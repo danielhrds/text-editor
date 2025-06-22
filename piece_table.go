@@ -106,7 +106,7 @@ func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, e
 }
 
 func (pt *PieceTable) GetAt(position uint) (rune, error) {
-	logger.Println("Position", position)
+	// logger.Println("Position", position)
 	if position > pt.Length {
 		return 0, fmt.Errorf("GetAt: error trying to get char at position > Length")
 	}

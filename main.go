@@ -88,7 +88,8 @@ func (w *Window) Draw() {
 	mouseStr := fmt.Sprintf("Mouse X: %f Mouse Y: %f", mouse.X, mouse.Y)
 	rl.DrawText(mouseStr, w.Width/2, w.Height/2, 20, rl.Pink)
 	rl.DrawText("Current position: "+strconv.Itoa(w.Editor.CurrentPosition), w.Width/2, w.Height/2+30, 20, rl.Pink)
-	// rl.DrawText("Current position"+strconv.Itoa(w.Editor.CurrentPosition), w.Width/2, w.Height/2+30, 20, rl.Pink)
+	rl.DrawText("Row: "+strconv.Itoa(w.Editor.Cursor.Row), w.Width/2, w.Height/2+60, 20, rl.Pink)
+	rl.DrawText("Column: "+strconv.Itoa(w.Editor.Cursor.Column), w.Width/2, w.Height/2+90, 20, rl.Pink)
 }
 
 func (w *Window) Input() {
@@ -169,9 +170,11 @@ func (w *Window) Input() {
 			w.Editor.Cursor.Rectangle.Y = w.Editor.Rectangle.Y
 			w.Editor.Cursor.Row = 0
 			w.Editor.Cursor.Column = 0
+			w.Editor.CurrentPosition = -1
 		}
 	}
 	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
 		logger.Println("Mouse button right")
+		w.Editor.SetCursorPosition(33)
 	}
 }

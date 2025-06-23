@@ -23,17 +23,28 @@ func main() {
 	rl.SetWindowState(rl.FlagWindowAlwaysRun)
 	rl.SetTargetFPS(window.FPS)
 
+	original, _ := ReadFile("example.txt")
 	pt := NewPieceTable(
-		Sequence(ReadFile("example.txt")),
+		Sequence(original),
 	)
 	pt.Insert(20, Sequence("went to the park and\n"))
+	logger.Println(pt.ToString())
 
-	editor := NewEditor(rl.NewRectangle(20, 0, float32(window.Width-100), float32(window.Height-100)), rl.Gray)
+	// original, _ := ReadFile("example2.txt")
+	// original, _ := ReadFile("example3.txt")
+	// pt := NewPieceTable(
+	// 	Sequence(original),
+	// )
+	// editor := NewEditor(rl.NewRectangle(20, 0, pfloat32(window.Width-100), float32(window.Height-100)), rl.Gray)
+	editor := NewEditor(rl.NewRectangle(20, 0, 250, float32(window.Height-100)), rl.Gray)
 	font := rl.LoadFontEx("fonts/JetBrainsMono-Regular.ttf", int32(editor.FontSize), nil, 0)
 	defer rl.UnloadFont(font)
 	editor.Font = &font
 	editor.PieceTable = &pt
 	window.Editor = &editor
+	window.Editor.InFocus = true
+	window.Editor.CalculateRows()
+	// window.Editor.SetCursorPosition(18)
 
 	for !rl.WindowShouldClose() {
 		rl.ClearBackground(rl.White)
@@ -44,7 +55,7 @@ func main() {
 	}
 }
 
-func ReadFile(path string) string {
+func ReadFile(path string) (string, int) {
 	file, err := os.Open(path)
 	if err != nil {
 		log.Fatal(err)
@@ -53,12 +64,12 @@ func ReadFile(path string) string {
 
 	scanner := bufio.NewScanner(file)
 	str := ""
-	i := 0
+	i := 1
 	for scanner.Scan() {
 		str += scanner.Text() + "\n"
 		i++
 	}
-	return str
+	return str, i
 }
 
 // @window
@@ -96,7 +107,7 @@ func (w *Window) Input() {
 	// key := rl.GetKeyPressed()
 	if w.Editor.InFocus {
 		if rl.IsKeyPressed(rl.KeyRight) {
-			w.Editor.SetCursorPosition(w.Editor.CurrentPosition+1)
+			w.Editor.SetCursorPosition(w.Editor.CurrentPosition + 1)
 			// position := w.Editor.CurrentPosition
 			// char, err := w.Editor.PieceTable.GetAt(uint(position))
 			// charRec := rl.MeasureTextEx(*w.Editor.Font, string(char), float32(w.Editor.FontSize), 0)
@@ -118,7 +129,7 @@ func (w *Window) Input() {
 		}
 
 		if rl.IsKeyPressed(rl.KeyLeft) {
-			w.Editor.SetCursorPosition(w.Editor.CurrentPosition-1)
+			w.Editor.SetCursorPosition(w.Editor.CurrentPosition - 1)
 			// position := w.Editor.CurrentPosition
 			// char, err := w.Editor.PieceTable.GetAt(uint(position))
 			// isNewLine := char == '\n'

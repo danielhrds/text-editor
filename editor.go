@@ -74,7 +74,7 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 	}
 }
 
-func (e *Editor) DrawText() {
+func (e *Editor) CalculateRows() {
 	currentRow := &Row{
 		0,
 		0,
@@ -82,44 +82,109 @@ func (e *Editor) DrawText() {
 		rl.NewVector2(0, 0),
 	}
 
-	length := 0
-	newRow := false
-
 	e.Rows = e.Rows[:0]
-	for i, char := range e.PieceTable.ToString() {
-		strChar := string(char)
-		if newRow {
-			previousRow := e.Rows[len(e.Rows)-1]
+	length := 0
+	newLine := false
+	lastSpaceIndex := -1
+	text := e.PieceTable.ToString()
+	for i := 0; i < len(text); i++ {
+		// Creates a new Row
+		if newLine {
+			newLine = false
+			lastSpaceIndex = -1
 			currentRow = &Row{
 				i,
 				0,
-				rl.NewRectangle(e.Rectangle.X, previousRow.Rectangle.Y+previousRow.Rectangle.Height, 0, 0),
+				rl.NewRectangle(e.Rectangle.X, currentRow.Rectangle.Y+currentRow.Rectangle.Height, 0, 0),
 				rl.NewVector2(0, 0),
 			}
-			newRow = false
 		}
 
+		char := text[i]
 		length++
+		stringChar := string(char)
+		textSizeVector2 := rl.MeasureTextEx(*e.Font, stringChar, float32(e.FontSize), 0)
+		currentRow.Rectangle.Width += textSizeVector2.X
+		if char == ' ' {
+			lastSpaceIndex = i
+		}
 		if char == '\n' {
+			newLine = true
 			currentRow.Length = length
-			newRow = true
 			length = 0
-			// logger.Printf("Row address %p %d %d", currentRow, currentRow.Start, currentRow.Length)
 			e.Rows = append(e.Rows, currentRow)
-		}
-		// if char != '\n' && i == int(e.PieceTable.PiecesAmount()-1) {
-		// 	currentRow.Length = length
-		// 	e.Rows = append(e.Rows, currentRow)
-		// }
+		} else {
+			charOutOfEditorBounds := currentRow.Rectangle.X+currentRow.Rectangle.Width+textSizeVector2.X >= e.Rectangle.X+e.Rectangle.Width
+			if charOutOfEditorBounds {
+				length = 0
+				newRowStart := -1 
+				if lastSpaceIndex == -1 || lastSpaceIndex < currentRow.Start {
+					// if a space isn't found within a row then we will wrap at the character
+					currentRow.Length = i - currentRow.Start
+					e.Rows = append(e.Rows, currentRow)
+					newRowStart = i
+				} else {
+					// if a space is found within a row then we will wrap the whole word
+					currentRow.Length = lastSpaceIndex - currentRow.Start + 1
+					e.Rows = append(e.Rows, currentRow)
+					charBeforeSpace := lastSpaceIndex
+					newRowStart = charBeforeSpace
+					i = charBeforeSpace
+				}
+				currentRow = &Row{
+					newRowStart,
+					length,
+					rl.NewRectangle(e.Rectangle.X, currentRow.Rectangle.Y+currentRow.Rectangle.Height, 0, 0),
+					rl.NewVector2(0, 0),
+				}
+				lastSpaceIndex = -1
+			}
 
-		textRec := rl.MeasureTextEx(*e.Font, strChar, float32(e.FontSize), 0)
-		if char != '\n' && currentRow.Rectangle.Height < textRec.Y {
-			currentRow.Rectangle.Height = textRec.Y
+			if currentRow.Rectangle.Height < textSizeVector2.Y {
+				// this serves to adjust the row height to the higher character found
+				currentRow.Rectangle.Height = textSizeVector2.Y
+			}
 		}
-		rl.DrawTextEx(*e.Font, strChar, rl.NewVector2(currentRow.Rectangle.X+currentRow.Rectangle.Width, currentRow.Rectangle.Y), float32(e.FontSize), 0, rl.Black)
-		currentRow.Rectangle.Width += textRec.X
 	}
-	// logger.Println(e.Rows)
+
+	// append the final row, otherwise it might not be added
+	if length > 0 {
+		currentRow.Length = length
+		e.Rows = append(e.Rows, currentRow)
+	}
+}
+
+func (e *Editor) DrawText() {	
+	// totalRowChars := 0
+	// text := e.PieceTable.ToString()
+	// for _, row := range e.Rows {
+	// 	totalRowChars += row.Length
+	// 	// logger.Println("Row", row, len(text))
+	// 	// logger.Println(text[row.Start:row.Length])
+	// }
+	// if totalRowChars < len(e.PieceTable.ToString()) {
+	// 	logger.Println("Warning: more characters than space in e.Rows", totalRowChars, len(e.PieceTable.ToString()))
+	// }
+
+	currentRowIndex := 0
+	currentRow := e.Rows[currentRowIndex]
+	charXPosition := currentRow.Rectangle.X
+	length := 0
+	for _, char := range e.PieceTable.ToString() {
+		if length == currentRow.Length {
+			currentRowIndex++
+			if currentRowIndex < len(e.Rows) {
+				currentRow = e.Rows[currentRowIndex]
+			}
+			length = 0
+			charXPosition = currentRow.Rectangle.X
+		}
+		length++
+		stringChar := string(char)
+		textSizeVector2 := rl.MeasureTextEx(*e.Font, stringChar, float32(e.FontSize), 0)
+		rl.DrawTextEx(*e.Font, stringChar, rl.NewVector2(charXPosition, currentRow.Rectangle.Y), float32(e.FontSize), 0, rl.Black)
+		charXPosition += textSizeVector2.X
+	}
 }
 
 func (e *Editor) Draw() {
@@ -140,8 +205,43 @@ func (e *Editor) SetFontSize(fontSize int) {
 	e.Cursor.Rectangle.Height = float32(fontSize)
 }
 
+// func (e *Editor) CalculateRows() {
+// 	currentRow := &Row{
+// 		0,
+// 		0,
+// 		rl.NewRectangle(e.Rectangle.X, e.Rectangle.Y, 0, 0),
+// 		rl.NewVector2(0, 0),
+// 	}
+
+// 	length := 0
+// 	newLine := false
+// 	for i, char := range e.PieceTable.ToString() {
+// 		stringChar := string(char)
+// 		length++
+// 		textSizeVector2 := rl.MeasureTextEx(*e.Font, stringChar, float32(e.FontSize), 0)
+// 		if newLine {
+// 			newLine = false
+// 			currentRow = &Row{
+// 				i,
+// 				0,
+// 				rl.NewRectangle(e.Rectangle.X, currentRow.Rectangle.Y+currentRow.Rectangle.Height, 0, 0),
+// 				rl.NewVector2(0, 0),
+// 			}
+// 		}
+// 		if char == '\n' {
+// 			currentRow.Length = length
+// 			newLine = true
+// 			length = 0
+// 			e.Rows = append(e.Rows, currentRow)
+// 		} else if currentRow.Rectangle.Height < textSizeVector2.Y {
+// 			currentRow.Rectangle.Height = textSizeVector2.Y
+// 		}
+// 		currentRow.Rectangle.Width += textSizeVector2.X
+// 	}
+// }
+
 func (e *Editor) MoveCursorForward() {
-	char, err := e.PieceTable.GetAt(uint(e.CurrentPosition+1))
+	char, err := e.PieceTable.GetAt(uint(e.CurrentPosition + 1))
 	logger.Println(string(char))
 	if err != nil {
 		return
@@ -193,7 +293,7 @@ func (e *Editor) MoveCursorBackward() {
 			previousRow := e.Rows[currentRowIndex-1]
 			e.Cursor.Rectangle.Y = previousRow.Rectangle.Y
 			e.Cursor.Rectangle.X = e.Rectangle.X + previousRow.Rectangle.Width
-			e.Cursor.Column = previousRow.Length-1
+			e.Cursor.Column = previousRow.Length - 1
 			e.CurrentPosition--
 			e.Cursor.Row--
 		}

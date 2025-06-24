@@ -71,9 +71,11 @@ func (ll *LinkedList[T]) InsertAt(value T, index int) error {
 		if err != nil {
 			return err
 		}
-		oldPrevious := nodeAtIndex.Previous // oldPrevious -> nodeAtIndex
+		oldPrevious := nodeAtIndex.Previous
 		oldPrevious.Next = newNode 					// oldPrevious -> newNode
 		newNode.Next = nodeAtIndex					// oldPrevious -> newNode -> nodeAtIndex
+		newNode.Previous = oldPrevious			// oldPrevious <- newNode
+		nodeAtIndex.Previous = newNode			// oldPrevious <- newNode <- nodeAtIndex
 	}
 	if index == int(ll.Length) {
 		ll.Append(value)

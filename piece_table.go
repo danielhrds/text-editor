@@ -440,7 +440,22 @@ func (pt *PieceTable) Delete(position uint, length uint) error {
 		if position == startPosition {
 			piece.Start += piece.Length - length
 		}
-		piece.Length -= piece.Length - length
+		// piece.Length = piece.Length - length
+		// delete at the middle of a piece
+		endPosition := startPosition+piece.Length
+		if position != endPosition {
+			// lengthBeforeChange := piece.Length
+			piece.Length = position - startPosition
+			newPieceStart := piece.Start+1+(position-startPosition)
+			newPiece := &Piece{
+				Start: newPieceStart,
+				Length: endPosition-(position+1),
+				isOriginal: piece.isOriginal,
+			}
+			pt.Pieces.InsertAt(newPiece, index+1)
+		} else {
+			piece.Length = piece.Length - length
+		}
 		pt.DeleteIfEmpty(piece, index)
 	} else if len(pieces) == 2 {
 		firstPiece := pieces[0]

@@ -35,14 +35,15 @@ func main() {
 	// pt := NewPieceTable(
 	// 	Sequence(original),
 	// )
-	// editor := NewEditor(rl.NewRectangle(20, 0, pfloat32(window.Width-100), float32(window.Height-100)), rl.Gray)
-	editor := NewEditor(rl.NewRectangle(20, 0, 250, float32(window.Height-100)), rl.Gray)
+	// editor := NewEditor(rl.NewRectangle(20, 0, float32(window.Width-100), float32(window.Height-100)), rl.Gray)
+	// editor := NewEditor(rl.NewRectangle(20, 0, 250, float32(window.Height-100)), rl.NewColor(30,30,30,255))
+	editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30,30,30,255))
 	font := rl.LoadFontEx("fonts/JetBrainsMono-Regular.ttf", int32(editor.FontSize), nil, 0)
 	defer rl.UnloadFont(font)
 	editor.Font = &font
 	editor.PieceTable = &pt
 	window.Editor = &editor
-	window.Editor.InFocus = true
+	// window.Editor.InFocus = true
 	window.Editor.CalculateRows()
 	// window.Editor.SetCursorPositionFromIndex(18)
 
@@ -109,15 +110,30 @@ func (w *Window) Draw() {
 }
 
 func (w *Window) Input() {
-	// key := rl.GetKeyPressed()
 	if w.Editor.InFocus {
+		// @arrow input
 		if rl.IsKeyPressed(rl.KeyRight) {
 			w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex + 1)
 		}
-
 		if rl.IsKeyPressed(rl.KeyLeft) {
 			w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex - 1)
 		}
+
+		// @keyboard input
+		if rl.IsKeyPressed(rl.KeyBackspace) && w.Editor.Cursor.CurrentIndex > 0 {
+			logger.Println("Deleting")
+			w.Editor.PieceTable.Delete(uint(w.Editor.Cursor.CurrentIndex)-1, 1)
+			w.Editor.CalculateRows()
+			w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex-1)
+		}
+		
+		char := rl.GetCharPressed()
+		if char > 0 {
+			logger.Println(char, string(char), w.Editor.Cursor.CurrentIndex, []rune{char})
+			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{char})
+			logger.Println(w.Editor.PieceTable.ToString())
+		}
+
 	}
 
 	// @mouse input
@@ -128,10 +144,8 @@ func (w *Window) Input() {
 		verticalBoundaries := mouseClickPosition.Y >= w.Editor.Rectangle.Y && mouseClickPosition.Y <= w.Editor.Rectangle.Y+w.Editor.Rectangle.Height
 		if horizontalBoundaries && verticalBoundaries {
 			logger.Println("Click inside Editor")
-			w.Editor.InFocus = true
-			// Right now I will put the cursor at the beginning but it should be where the mouse clicked
-			// X and Y should be based on row and column
 			logger.Println("Cursor setted")
+			w.Editor.InFocus = true
 			w.Editor.SetCursorPositionFromClick(mouseClickPosition)
 		}
 	}

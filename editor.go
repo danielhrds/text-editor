@@ -19,6 +19,7 @@ type Cursor struct {
 	Row, Column  int
 	CurrentIndex int
 	LastTick     time.Time
+	Color        rl.Color
 }
 
 func NewCursor(rectangle rl.Rectangle, row int, column int) Cursor {
@@ -28,6 +29,7 @@ func NewCursor(rectangle rl.Rectangle, row int, column int) Cursor {
 		Column:       column,
 		LastTick:     time.Now(),
 		CurrentIndex: 0,
+		Color:        rl.White,
 	}
 }
 
@@ -50,7 +52,7 @@ func (c *Cursor) Draw() {
 			c.Rectangle.ToInt32().Y,
 			c.Rectangle.ToInt32().Width,
 			c.Rectangle.ToInt32().Height,
-			rl.Black,
+			c.Color,
 		)
 	}
 }
@@ -66,6 +68,7 @@ type Editor struct {
 	PieceTable        *PieceTable
 	Font              *rl.Font
 	FontSize          int
+	FontColor					rl.Color
 	PreviousCharacter rune
 }
 
@@ -79,7 +82,20 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 		Cursor:          NewCursor(rl.NewRectangle(rectangle.X, rectangle.Y, 3, float32(fontSize)), 0, 0),
 		PieceTable:      &pieceTable,
 		FontSize:        fontSize,
+		FontColor: 			 rl.White,
 		Rows:            make([]*Row, 0),
+		CharRecCache:    make(map[rune]rl.Vector2),
+	}
+}
+
+func (e *Editor) GetCharRectangle(char rune) rl.Vector2 {
+	fromCache, ok := e.CharRecCache[char]
+	if ok {
+		return fromCache
+	} else {
+		charRec := rl.MeasureTextEx(*e.Font, string(char), float32(e.FontSize), 0) 
+		e.CharRecCache[char] = charRec
+		return charRec
 	}
 }
 
@@ -112,8 +128,7 @@ func (e *Editor) CalculateRows() {
 
 		char := text[i]
 		length++
-		stringChar := string(char)
-		textSizeVector2 := rl.MeasureTextEx(*e.Font, stringChar, float32(e.FontSize), 0)
+		textSizeVector2 := e.GetCharRectangle(rune(char))
 		currentRow.Rectangle.Width += textSizeVector2.X
 		if char == ' ' {
 			lastSpaceIndex = i
@@ -134,6 +149,7 @@ func (e *Editor) CalculateRows() {
 					currentRow.Length = i - currentRow.Start
 					e.Rows = append(e.Rows, currentRow)
 					newRowStart = i
+					length = 1
 				} else {
 					// if a space is found within a row then we will wrap the whole word
 					currentRow.Length = lastSpaceIndex - currentRow.Start + 1
@@ -168,16 +184,16 @@ func (e *Editor) CalculateRows() {
 }
 
 func (e *Editor) DrawText() {
-	// totalRowChars := 0
-	// text := e.PieceTable.ToString()
-	// for _, row := range e.Rows {
-	// 	totalRowChars += row.Length
-	// 	// logger.Println("Row", row, len(text))
-	// 	// logger.Println(text[row.Start:row.Length])
-	// }
-	// if totalRowChars < len(e.PieceTable.ToString()) {
-	// 	logger.Println("Warning: more characters than space in e.Rows", totalRowChars, len(e.PieceTable.ToString()))
-	// }
+	totalRowChars := 0
+	text := e.PieceTable.ToString()
+	for _, row := range e.Rows {
+		totalRowChars += row.Length
+		// logger.Println("Row", row, len(text))
+		// logger.Println(text[row.Start:row.Length])
+	}
+	if totalRowChars < len(text) {
+		logger.Println("Warning: more characters than space in e.Rows", totalRowChars, len(text))
+	}
 
 	currentRowIndex := 0
 	currentRow := e.Rows[currentRowIndex]
@@ -194,8 +210,8 @@ func (e *Editor) DrawText() {
 		}
 		length++
 		stringChar := string(char)
-		textSizeVector2 := rl.MeasureTextEx(*e.Font, stringChar, float32(e.FontSize), 0)
-		rl.DrawTextEx(*e.Font, stringChar, rl.NewVector2(charXPosition, currentRow.Rectangle.Y), float32(e.FontSize), 0, rl.Black)
+		textSizeVector2 := e.GetCharRectangle(char)
+		rl.DrawTextEx(*e.Font, stringChar, rl.NewVector2(charXPosition, currentRow.Rectangle.Y), float32(e.FontSize), 0, e.FontColor)
 		charXPosition += textSizeVector2.X
 	}
 }
@@ -243,7 +259,7 @@ func (e *Editor) MoveCursorForward() {
 	// if isNewLine {
 	// 	charToMeasure = char
 	// }
-	charRec := rl.MeasureTextEx(*e.Font, string(charToMeasure), float32(e.FontSize), 0)
+	charRec := e.GetCharRectangle(charToMeasure)
 	if isNewLine && e.Cursor.Column > 0 {
 		logger.Println("isNewLine")
 		e.Cursor.CurrentIndex++
@@ -304,7 +320,7 @@ func (e *Editor) MoveCursorBackward() {
 			e.Cursor.CurrentIndex--
 		}
 	} else {
-		charRec := rl.MeasureTextEx(*e.Font, string(charToMeasure), float32(e.FontSize), 0)
+		charRec := e.GetCharRectangle(charToMeasure)
 		e.Cursor.Rectangle.X -= charRec.X
 		e.Cursor.CurrentIndex--
 	}
@@ -367,17 +383,14 @@ func (e *Editor) SetCursorPositionFromClick(mouseClickPosition rl.Vector2) {
 		column := 0
 		var previousCharacter rune
 		var previousCharacterX float32
-		for i, char := range iterableText {
+		for _, char := range iterableText {
 			if char == '\n' {
 				continue
 			}
-			column = i
-			charRec := rl.MeasureTextEx(*e.Font, string(char), float32(e.FontSize), 0)
+			column++
+			charRec := e.GetCharRectangle(char)
 			betweenPostPreviousCharHalfAndPreHalfChar := mouseClickPosition.X > previousCharacterX && mouseClickPosition.X < charXPosition+(charRec.X/2)
 			if betweenPostPreviousCharHalfAndPreHalfChar {
-				// e.Cursor.SetPosition(currentIndex, charXPosition, foundRow.Rectangle.Y, rowIndex, column)
-				// e.PreviousCharacter = previousCharacter
-				// wasCharXFound = true
 				break
 			}
 			previousCharacter = char
@@ -386,11 +399,18 @@ func (e *Editor) SetCursorPositionFromClick(mouseClickPosition rl.Vector2) {
 			currentIndex++
 		}
 		e.Cursor.SetPosition(currentIndex, charXPosition, foundRow.Rectangle.Y, rowIndex, column)
-		// e.Cursor.CurrentIndex = currentIndex
-		// e.Cursor.Rectangle.X = charXPosition
-		// e.Cursor.Rectangle.Y = foundRow.Rectangle.Y
-		// e.Cursor.Row = rowIndex
-		// e.Cursor.Column = column
 		e.PreviousCharacter = previousCharacter
 	}
+}
+
+func (e *Editor) Insert(index int, text Sequence) {
+	e.PieceTable.Insert(uint(index), text)
+	e.CalculateRows()
+	e.SetCursorPositionFromIndex(index+1)
+}
+
+func (e *Editor) Delete(index int, text Sequence) {
+	e.PieceTable.Delete(uint(index), 1)
+	e.CalculateRows()
+	e.SetCursorPositionFromIndex(index-1)
 }

@@ -15,18 +15,28 @@ type Row struct {
 
 // @cursor
 type Cursor struct {
-	Rectangle   rl.Rectangle
-	Row, Column int
-	LastTick    time.Time
+	Rectangle    rl.Rectangle
+	Row, Column  int
+	CurrentIndex int
+	LastTick     time.Time
 }
 
 func NewCursor(rectangle rl.Rectangle, row int, column int) Cursor {
 	return Cursor{
-		Rectangle: rectangle,
-		Row:       row,
-		Column:    column,
-		LastTick:  time.Now(),
+		Rectangle:    rectangle,
+		Row:          row,
+		Column:       column,
+		LastTick:     time.Now(),
+		CurrentIndex: 0,
 	}
+}
+
+func (c *Cursor) SetPosition(currentIndex int, x float32, y float32, row int, column int) {
+	c.CurrentIndex = currentIndex
+	c.Rectangle.X = x
+	c.Rectangle.Y = y
+	c.Row = row
+	c.Column = column
 }
 
 func (c *Cursor) Draw() {
@@ -47,12 +57,12 @@ func (c *Cursor) Draw() {
 
 // @editor
 type Editor struct {
+	CharRecCache      map[rune]rl.Vector2
 	Rectangle         rl.Rectangle
 	BackgroundColor   rl.Color
 	InFocus           bool
 	Cursor            Cursor
 	Rows              []*Row
-	CurrentPosition   int
 	PieceTable        *PieceTable
 	Font              *rl.Font
 	FontSize          int
@@ -70,7 +80,6 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 		PieceTable:      &pieceTable,
 		FontSize:        fontSize,
 		Rows:            make([]*Row, 0),
-		CurrentPosition: 0,
 	}
 }
 
@@ -119,7 +128,7 @@ func (e *Editor) CalculateRows() {
 			charOutOfEditorBounds := currentRow.Rectangle.X+currentRow.Rectangle.Width+textSizeVector2.X >= e.Rectangle.X+e.Rectangle.Width
 			if charOutOfEditorBounds {
 				length = 0
-				newRowStart := -1 
+				newRowStart := -1
 				if lastSpaceIndex == -1 || lastSpaceIndex < currentRow.Start {
 					// if a space isn't found within a row then we will wrap at the character
 					currentRow.Length = i - currentRow.Start
@@ -131,7 +140,7 @@ func (e *Editor) CalculateRows() {
 					currentRow.Rectangle.Width = lastWidth
 					e.Rows = append(e.Rows, currentRow)
 					charBeforeSpace := lastSpaceIndex
-					charAfterSpace := charBeforeSpace+1
+					charAfterSpace := charBeforeSpace + 1
 					newRowStart = charAfterSpace
 					i = charBeforeSpace
 				}
@@ -158,7 +167,7 @@ func (e *Editor) CalculateRows() {
 	}
 }
 
-func (e *Editor) DrawText() {	
+func (e *Editor) DrawText() {
 	// totalRowChars := 0
 	// text := e.PieceTable.ToString()
 	// for _, row := range e.Rows {
@@ -209,40 +218,35 @@ func (e *Editor) SetFontSize(fontSize int) {
 	e.Cursor.Rectangle.Height = float32(fontSize)
 }
 
+func (e *Editor) FindRowFromPosition(mouseClickPosition rl.Vector2) (*Row, int) {
+	for index, row := range e.Rows {
+		if mouseClickPosition.Y > row.Rectangle.Y && mouseClickPosition.Y < row.Rectangle.Y+row.Rectangle.Height {
+			return row, index
+		}
+	}
+	return nil, 1
+}
+
 func (e *Editor) MoveCursorForward() {
-	currentChar, _ := e.PieceTable.GetAt(uint(e.CurrentPosition))
-	char, err := e.PieceTable.GetAt(uint(e.CurrentPosition + 1))
+	currentChar, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex))
+	char, err := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex + 1))
 	logger.Println("Current char", string(currentChar), "Next char: ", string(char))
 	if err != nil {
 		return
 	}
 	currentRow := e.Rows[e.Cursor.Row]
-
-	// if currentChar == '\n' {
-	// 	e.CurrentPosition++
-	// 	e.Cursor.Column = 0
-	// 	e.Cursor.Rectangle.X = e.Rectangle.X
-	// 	// Send Cursor to the next Row
-	// 	if e.Cursor.Row != len(e.Rows)-1 {
-	// 		nextRow := e.Rows[e.Cursor.Row+1]
-	// 		e.Cursor.Rectangle.Y = nextRow.Rectangle.Y
-	// 		e.Cursor.Row++
-	// 	}
-	// 	return
-	// }
-	
-	isEndOfRow := e.CurrentPosition == currentRow.Start+currentRow.Length
+	isEndOfRow := e.Cursor.CurrentIndex == currentRow.Start+currentRow.Length
 	isNewLine := currentChar == '\n'
 	logger.Println(isEndOfRow, isNewLine)
 
 	charToMeasure := currentChar
-	if isNewLine {
-		charToMeasure = char
-	}
+	// if isNewLine {
+	// 	charToMeasure = char
+	// }
 	charRec := rl.MeasureTextEx(*e.Font, string(charToMeasure), float32(e.FontSize), 0)
 	if isNewLine && e.Cursor.Column > 0 {
 		logger.Println("isNewLine")
-		e.CurrentPosition++
+		e.Cursor.CurrentIndex++
 		e.Cursor.Column = 0
 		e.Cursor.Rectangle.X = e.Rectangle.X
 		if e.Cursor.Row != len(e.Rows)-1 {
@@ -254,8 +258,8 @@ func (e *Editor) MoveCursorForward() {
 		e.Cursor.Column++
 		e.Cursor.Rectangle.X += charRec.X
 		e.PreviousCharacter = currentChar
-		e.CurrentPosition++
-	} else { 
+		e.Cursor.CurrentIndex++
+	} else {
 		e.Cursor.Column = 0
 		e.Cursor.Rectangle.X = e.Rectangle.X
 		// Send Cursor to the next Row
@@ -268,75 +272,56 @@ func (e *Editor) MoveCursorForward() {
 }
 
 func (e *Editor) MoveCursorBackward() {
-	previousCharacter, _ := e.PieceTable.GetAt(uint(e.CurrentPosition-1))
-	char, err := e.PieceTable.GetAt(uint(e.CurrentPosition))
-	logger.Println(string(char))
-	if err != nil {
-		return
-	}
+	previousCharacter, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex - 1))
+	// char, err := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex))
+
+	// if err != nil {
+	// 	return
+	// }1
 	e.Cursor.Column--
-	// if e.Cursor.Row > 0 && e.Cursor.Column == 0 {
-	// }
-	// e.CurrentPosition--
-	
+
 	previousRow := &Row{
 		Start: -1,
 	}
 	if e.Cursor.Row > 0 {
 		previousRow = e.Rows[e.Cursor.Row-1]
 	}
-	// currentRow := e.Rows[e.Cursor.Row]
-	// isNewLine := char == '\n'
-	// logger.Println(previousRow)
-	
-	shouldGoBack := previousRow.Start != -1 && e.CurrentPosition == previousRow.Start+previousRow.Length
-	charToMeasure := char
-	if !shouldGoBack {
-		charToMeasure = e.PreviousCharacter
-	}
-	
-	if !shouldGoBack {
-		charRec := rl.MeasureTextEx(*e.Font, string(charToMeasure), float32(e.FontSize), 0)
-		logger.Println("shouldGoBack", e.PreviousCharacter, charRec)
-		e.Cursor.Rectangle.X -= charRec.X
-		e.CurrentPosition--
-	} else {
-		if e.Cursor.Row > 0 {
-			previousRow := e.Rows[e.Cursor.Row-1]
-			e.Cursor.Rectangle.Y = previousRow.Rectangle.Y
-			e.Cursor.Rectangle.X = e.Rectangle.X + previousRow.Rectangle.Width
-			e.Cursor.Column = previousRow.Length
-			e.Cursor.Row--
-			isFromPreviousRow := e.CurrentPosition-1 > previousRow.Start && e.CurrentPosition-1 < previousRow.Start+previousRow.Length 
-			isNewLineFromPreviousRow := previousCharacter == '\n'
-			if isFromPreviousRow && isNewLineFromPreviousRow {
-				e.CurrentPosition--
-			}
+
+	shouldGoBackToPreviousRow := previousRow.Start != -1 && e.Cursor.CurrentIndex == previousRow.Start+previousRow.Length
+	// charToMeasure := char
+	// if !shouldGoBackToPreviousRow {
+	// }
+	charToMeasure := e.PreviousCharacter
+	if shouldGoBackToPreviousRow && e.Cursor.Row > 0 {
+		previousRow := e.Rows[e.Cursor.Row-1]
+		e.Cursor.Rectangle.Y = previousRow.Rectangle.Y
+		e.Cursor.Rectangle.X = e.Rectangle.X + previousRow.Rectangle.Width
+		e.Cursor.Column = previousRow.Length
+		e.Cursor.Row--
+		isFromPreviousRow := e.Cursor.CurrentIndex-1 > previousRow.Start && e.Cursor.CurrentIndex-1 < previousRow.Start+previousRow.Length
+		isNewLineFromPreviousRow := previousCharacter == '\n'
+		if isFromPreviousRow && isNewLineFromPreviousRow {
+			e.Cursor.CurrentIndex--
 		}
-		// currentRow := e.Rows[e.Cursor.Row]
-		// isTheSameRow := e.CurrentPosition-1 > currentRow.Start && e.CurrentPosition-1 < currentRow.Start+currentRow.Length
-		// logger.Println("isTheSameRow: ", isTheSameRow)
-		// Send Cursor to the previous Row
-		// if isTheSameRow {
-		// 	charRec := rl.MeasureTextEx(*e.Font, string(e.PreviousCharacter), float32(e.FontSize), 0)
-		// 	e.Cursor.Rectangle.X -= charRec.X
-		// }
+	} else {
+		charRec := rl.MeasureTextEx(*e.Font, string(charToMeasure), float32(e.FontSize), 0)
+		e.Cursor.Rectangle.X -= charRec.X
+		e.Cursor.CurrentIndex--
 	}
 }
 
-func (e *Editor) SetCursorPosition(newPosition int) {
+func (e *Editor) SetCursorPositionFromIndex(newPosition int) {
 	currentRow := e.Rows[e.Cursor.Row]
-	inRowBoundaries := newPosition >= currentRow.Start && newPosition <= currentRow.Start+currentRow.Length-1
-	// logger.Println("start: ", currentRow.Start, "length: ", currentRow.Length, "start+length: ", currentRow.Start+currentRow.Length, "newPosition: ", newPosition, inRowBoundaries)
-	if inRowBoundaries {
-		if newPosition > e.CurrentPosition {
-			iterations := newPosition - e.CurrentPosition
+	inCurrentRowBoundaries := newPosition >= currentRow.Start && newPosition <= currentRow.Start+currentRow.Length-1
+	if inCurrentRowBoundaries {
+		if newPosition > e.Cursor.CurrentIndex {
+			iterations := newPosition - e.Cursor.CurrentIndex
 			for range iterations {
 				e.MoveCursorForward()
 			}
 		}
-		if newPosition < e.CurrentPosition {
-			iterations := e.CurrentPosition - newPosition
+		if newPosition < e.Cursor.CurrentIndex {
+			iterations := e.Cursor.CurrentIndex - newPosition
 			for range iterations {
 				e.MoveCursorBackward()
 			}
@@ -346,44 +331,66 @@ func (e *Editor) SetCursorPosition(newPosition int) {
 			foundRow := newPosition >= row.Start && newPosition <= row.Start+row.Length-1 || e.Cursor.Column == 1
 			logger.Println(row.Start, row.Start+row.Length-1, foundRow)
 			if foundRow {
-				// e.Cursor.Column = 0
-				// e.Cursor.Row = rowIndex
-				// e.Cursor.Rectangle.X = e.Rectangle.X
-				// e.Cursor.Rectangle.Y = row.Rectangle.Y
-				if newPosition > e.CurrentPosition {
-					iterations := newPosition - e.CurrentPosition
+				if newPosition > e.Cursor.CurrentIndex {
+					iterations := newPosition - e.Cursor.CurrentIndex
 					for range iterations {
 						e.MoveCursorForward()
 					}
 				}
-				if newPosition < e.CurrentPosition {
-					iterations := e.CurrentPosition - newPosition
+				if newPosition < e.Cursor.CurrentIndex {
+					iterations := e.Cursor.CurrentIndex - newPosition
 					for range iterations {
 						e.MoveCursorBackward()
 					}
 				}
-				// e.Cursor.Row = rowIndex
-				break
+				return
 			}
 		}
 	}
+}
 
-	// currentPosition := e.CurrentPosition
-	// char, err := e.PieceTable.GetAt(uint(currentPosition))
-	// charRec := rl.MeasureTextEx(*e.Font, string(char), float32(e.FontSize), 0)
-	// if char != '\n' {
-	// 	if err == nil {
-	// 		e.Cursor.Column++
-	// 		e.CurrentPosition++
-	// 		e.Cursor.Rectangle.X += charRec.X
-	// 	}
-	// } else {
-	// 	e.Cursor.Column = 0
-	// 	e.Cursor.Rectangle.X = e.Rectangle.X
-
-	// 	currentRowIndex := e.Cursor.Row
-	// 	currentRow := e.Rows[currentRowIndex]
-	// 	e.Cursor.Rectangle.Y = currentRow.Rectangle.Y + currentRow.Rectangle.Height
-	// 	e.Cursor.Row++
-	// }
+func (e *Editor) SetCursorPositionFromClick(mouseClickPosition rl.Vector2) {
+	var foundRow *Row = nil
+	rowIndex := 0
+	for i, row := range e.Rows {
+		if mouseClickPosition.Y > row.Rectangle.Y && mouseClickPosition.Y < row.Rectangle.Y+row.Rectangle.Height {
+			foundRow = row
+			rowIndex = i
+		}
+	}
+	if foundRow != nil {
+		text := e.PieceTable.ToString()
+		iterableText := text[foundRow.Start : foundRow.Start+foundRow.Length]
+		charXPosition := foundRow.Rectangle.X
+		currentIndex := foundRow.Start
+		// wasCharXFound := false
+		column := 0
+		var previousCharacter rune
+		var previousCharacterX float32
+		for i, char := range iterableText {
+			if char == '\n' {
+				continue
+			}
+			column = i
+			charRec := rl.MeasureTextEx(*e.Font, string(char), float32(e.FontSize), 0)
+			betweenPostPreviousCharHalfAndPreHalfChar := mouseClickPosition.X > previousCharacterX && mouseClickPosition.X < charXPosition+(charRec.X/2)
+			if betweenPostPreviousCharHalfAndPreHalfChar {
+				// e.Cursor.SetPosition(currentIndex, charXPosition, foundRow.Rectangle.Y, rowIndex, column)
+				// e.PreviousCharacter = previousCharacter
+				// wasCharXFound = true
+				break
+			}
+			previousCharacter = char
+			previousCharacterX = charXPosition
+			charXPosition += charRec.X
+			currentIndex++
+		}
+		e.Cursor.SetPosition(currentIndex, charXPosition, foundRow.Rectangle.Y, rowIndex, column)
+		// e.Cursor.CurrentIndex = currentIndex
+		// e.Cursor.Rectangle.X = charXPosition
+		// e.Cursor.Rectangle.Y = foundRow.Rectangle.Y
+		// e.Cursor.Row = rowIndex
+		// e.Cursor.Column = column
+		e.PreviousCharacter = previousCharacter
+	}
 }

@@ -1,5 +1,8 @@
 package main
 
+// Implement ToString cache
+// - Invalidate cache if an Insert or Delete occurs 
+
 import (
 	"fmt"
 	"iter"

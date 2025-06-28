@@ -90,19 +90,44 @@ func (pt *PieceTable) ToString() string {
 
 func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, error) {
 	sequence := Sequence{}
-	// piece, startPosition, endPosition, _, err := pt.FindPiece(start)
 	pieces, _, startPosition, err := pt.FindPieces(position, length)
 	if err != nil {
 		return Sequence{}, 0, err
 	}
-	for _, piece := range pieces {
-		start, length := piece.Start, piece.Start+piece.Length
+	trackLength := 0
+	// if pieces[0].isOriginal {
+	// 	logger.Println(string(pt.OriginalBuffer[pieces[0].Start:pieces[0].Length]))
+	// } else {
+	// 	logger.Println(string(pt.AddBuffer[pieces[0].Start:pieces[0].Length]))
+	// }
+	for i, piece := range pieces {
+		start, end := piece.Start, piece.Start+piece.Length
+		if i == 0 {
+			start += position-startPosition
+		}
+
+		// logger.Println(position-startPosition)
+		// logger.Println(end-start)
+		// if end-start < length {
+		// 	end += length
+		// }
+		isGreaterThanLength := end-start > length
+		if isGreaterThanLength {
+			end = start + (length-uint(trackLength))
+		}
 		if piece.isOriginal {
-			sequence = append(sequence, pt.OriginalBuffer[start:length]...)
+			sequence = append(sequence, pt.OriginalBuffer[start:end]...)
 		}
 		if !piece.isOriginal {
-			sequence = append(sequence, pt.AddBuffer[start:length]...)
+			sequence = append(sequence, pt.AddBuffer[start:end]...)
 		}
+		trackLength += int(end-start)
+		if trackLength == int(length) {
+			// end -= (uint(len(sequence)) + piece.Length)-length
+			break
+		}
+		startPosition += piece.Length
+		// logger.Println(string(sequence))
 	}
 
 	return sequence, startPosition, nil
@@ -221,7 +246,6 @@ func (pt *PieceTable) FindPieces(position uint, length uint) ([]*Piece, int, uin
 	// Also, that means p3End > position and p3End
 
 	var pieces []*Piece
-	// var pieceIndexes []uint
 	var firstPieceFoundIndex int
 	var startPosition uint
 	var startFromBeginning bool = position < pt.Length/2
@@ -240,23 +264,16 @@ func (pt *PieceTable) FindPieces(position uint, length uint) ([]*Piece, int, uin
 					firstPieceFoundIndex = i
 				}
 				pieces = append(pieces, piece)
-				// pieceIndexes = append(pieceIndexes, uint(i))
 			}
 			endPositionBeforeSwitchPiece = endPosition
 		}
 	}
 	if !startFromBeginning {
 		var endPosition uint = pt.Length
-		// var endPositionBeforeSwitchPiece uint = pt.Length
 		for i, piece := range pt.Pieces.Backward() {
 			endPosition -= piece.Length
 			if endPosition < position+length {
-				// if len(pieces) == 0 {
-				// 	// startPosition = endPositionBeforeSwitchPiece
-				// 	firstPieceFoundIndex = i
-				// }
 				pieces = append(pieces, piece)
-				// pieceIndexes = append(pieceIndexes, uint(i))
 			}
 			if endPosition < position && endPosition < position+length {
 				startPosition = endPosition
@@ -361,7 +378,7 @@ func (pt *PieceTable) DeleteIfEmpty(piece *Piece, index int) {
 func (pt *PieceTable) Delete(position uint, length uint) error {
 	// OBS: Since deletion shifts items from an array to the left, Delete would benefit from a linked list.
 
-	if position == 0 {
+	if length == 0 {
 		return fmt.Errorf("Delete: error trying to delete string of length 0")
 	}
 	// if position < 0 {

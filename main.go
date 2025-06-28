@@ -36,16 +36,14 @@ func main() {
 	// 	Sequence(original),
 	// )
 	// editor := NewEditor(rl.NewRectangle(20, 0, float32(window.Width-100), float32(window.Height-100)), rl.Gray)
-	// editor := NewEditor(rl.NewRectangle(20, 0, 250, float32(window.Height-100)), rl.NewColor(30,30,30,255))
-	editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30,30,30,255))
+	editor := NewEditor(rl.NewRectangle(0, 0, 250, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
+	// editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30,30,30,255))
 	font := rl.LoadFontEx("fonts/JetBrainsMono-Regular.ttf", int32(editor.FontSize), nil, 0)
 	defer rl.UnloadFont(font)
 	editor.Font = &font
 	editor.PieceTable = &pt
 	window.Editor = &editor
-	// window.Editor.InFocus = true
 	window.Editor.CalculateRows()
-	// window.Editor.SetCursorPositionFromIndex(18)
 
 	for !rl.WindowShouldClose() {
 		rl.ClearBackground(rl.White)
@@ -101,16 +99,19 @@ func (w *Window) Draw() {
 	rl.DrawText(mouseStr, w.Width/2, w.Height/2, 20, rl.Pink)
 	rl.DrawText("Current position: "+strconv.Itoa(w.Editor.Cursor.CurrentIndex), w.Width/2, w.Height/2+30, 20, rl.Pink)
 	rl.DrawText("Row: "+strconv.Itoa(w.Editor.Cursor.Row)+" Start: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Start)+" Length: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Length), w.Width/2, w.Height/2+60, 20, rl.Pink)
-	rl.DrawText("Column: "+strconv.Itoa(w.Editor.Cursor.Column), w.Width/2, w.Height/2+90, 20, rl.Pink)
+	rl.DrawText("Row Width: "+strconv.Itoa(int(w.Editor.Rows[w.Editor.Cursor.Row].Rectangle.Width)), w.Width/2, w.Height/2+90, 20, rl.Pink)
+	rl.DrawText("Column: "+strconv.Itoa(w.Editor.Cursor.Column), w.Width/2, w.Height/2+120, 20, rl.Pink)
 
 	char, _ := w.Editor.PieceTable.GetAt(uint(w.Editor.Cursor.CurrentIndex))
-	rl.DrawText("Current character: "+string(char), w.Width/2, w.Height/2+120, 20, rl.Pink)
-	rl.DrawText("Previous character: "+string(w.Editor.PreviousCharacter), w.Width/2, w.Height/2+150, 20, rl.Pink)
+	rl.DrawText("Current character: "+string(char), w.Width/2, w.Height/2+150, 20, rl.Pink)
+	rl.DrawText("Previous character: "+string(w.Editor.PreviousCharacter), w.Width/2, w.Height/2+180, 20, rl.Pink)
 
 }
 
 func (w *Window) Input() {
 	if w.Editor.InFocus {
+		char := rl.GetCharPressed()
+
 		// @arrow input
 		if rl.IsKeyPressed(rl.KeyRight) {
 			w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex + 1)
@@ -121,36 +122,32 @@ func (w *Window) Input() {
 
 		// @keyboard input
 		if rl.IsKeyPressed(rl.KeyBackspace) && w.Editor.Cursor.CurrentIndex > 0 {
-			logger.Println("Deleting")
-			w.Editor.PieceTable.Delete(uint(w.Editor.Cursor.CurrentIndex)-1, 1)
-			w.Editor.CalculateRows()
-			w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex-1)
+			w.Editor.Delete(w.Editor.Cursor.CurrentIndex - 1)
 		}
-		
-		char := rl.GetCharPressed()
+
 		if char > 0 {
 			logger.Println(char, string(char), w.Editor.Cursor.CurrentIndex, []rune{char})
 			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{char})
 			logger.Println(w.Editor.PieceTable.ToString())
 		}
 
+		if rl.IsKeyPressed(rl.KeyEnter) {
+			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{'\n'})
+			logger.Println(w.Editor.PieceTable.ToString())
+		}
 	}
 
 	// @mouse input
 	if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-		logger.Println("Mouse button left")
 		mouseClickPosition := rl.GetMousePosition()
 		horizontalBoundaries := mouseClickPosition.X >= w.Editor.Rectangle.X && mouseClickPosition.X <= w.Editor.Rectangle.X+w.Editor.Rectangle.Width
 		verticalBoundaries := mouseClickPosition.Y >= w.Editor.Rectangle.Y && mouseClickPosition.Y <= w.Editor.Rectangle.Y+w.Editor.Rectangle.Height
 		if horizontalBoundaries && verticalBoundaries {
-			logger.Println("Click inside Editor")
-			logger.Println("Cursor setted")
 			w.Editor.InFocus = true
 			w.Editor.SetCursorPositionFromClick(mouseClickPosition)
 		}
 	}
 	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
-		logger.Println("Mouse button right")
-		w.Editor.SetCursorPositionFromIndex(33)
+		// w.Editor.SetCursorPosition(33)
 	}
 }

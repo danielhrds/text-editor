@@ -36,8 +36,8 @@ func main() {
 	// 	Sequence(original),
 	// )
 	// editor := NewEditor(rl.NewRectangle(20, 0, float32(window.Width-100), float32(window.Height-100)), rl.Gray)
-	editor := NewEditor(rl.NewRectangle(0, 0, 250, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
-	// editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30,30,30,255))
+	// editor := NewEditor(rl.NewRectangle(0, 0, 250, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
+	editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30, 30, 30, 255))
 	font := rl.LoadFontEx("fonts/JetBrainsMono-Regular.ttf", int32(editor.FontSize), nil, 0)
 	defer rl.UnloadFont(font)
 	editor.Font = &font
@@ -105,7 +105,9 @@ func (w *Window) Draw() {
 	char, _ := w.Editor.PieceTable.GetAt(uint(w.Editor.Cursor.CurrentIndex))
 	rl.DrawText("Current character: "+string(char), w.Width/2, w.Height/2+150, 20, rl.Pink)
 	rl.DrawText("Previous character: "+string(w.Editor.PreviousCharacter), w.Width/2, w.Height/2+180, 20, rl.Pink)
-
+	
+	rl.DrawText("Cursor X: "+strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.X), 'f', 2, 32), w.Width/2, w.Height/2+210, 20, rl.Pink)
+	rl.DrawText("Cursor Y: "+strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.Y), 'f', 2, 32), w.Width/2, w.Height/2+240, 20, rl.Pink)
 }
 
 func (w *Window) Input() {
@@ -114,26 +116,26 @@ func (w *Window) Input() {
 
 		// @arrow input
 		if rl.IsKeyPressed(rl.KeyRight) {
+			w.Editor.AddAction(CURSOR_MOVE)
 			w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex + 1)
 		}
 		if rl.IsKeyPressed(rl.KeyLeft) {
+			w.Editor.AddAction(CURSOR_MOVE)
 			w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex - 1)
 		}
 
 		// @keyboard input
 		if rl.IsKeyPressed(rl.KeyBackspace) && w.Editor.Cursor.CurrentIndex > 0 {
-			w.Editor.Delete(w.Editor.Cursor.CurrentIndex - 1)
+			w.Editor.Delete(w.Editor.Cursor.CurrentIndex - 1, 1)
 		}
 
 		if char > 0 {
 			logger.Println(char, string(char), w.Editor.Cursor.CurrentIndex, []rune{char})
 			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{char})
-			logger.Println(w.Editor.PieceTable.ToString())
 		}
 
 		if rl.IsKeyPressed(rl.KeyEnter) {
 			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{'\n'})
-			logger.Println(w.Editor.PieceTable.ToString())
 		}
 	}
 
@@ -146,6 +148,7 @@ func (w *Window) Input() {
 			w.Editor.InFocus = true
 			w.Editor.SetCursorPositionFromClick(mouseClickPosition)
 		}
+		w.Editor.AddAction(MOUSE_LEFT_CLICK)
 	}
 	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
 		// w.Editor.SetCursorPosition(33)

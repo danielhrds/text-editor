@@ -47,9 +47,9 @@ func main() {
 
 	for !rl.WindowShouldClose() {
 		rl.ClearBackground(rl.White)
+		window.Input()
 		rl.BeginDrawing()
 		window.Draw()
-		window.Input()
 		rl.EndDrawing()
 	}
 }

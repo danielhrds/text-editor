@@ -235,6 +235,7 @@ func (e *Editor) CalculateRows() {
 	for i, row := range e.Rows {
 		logger.Println("Row: ", i, "| Row Start: ", row.Start, "| Row Length: ", row.Length, "| Row Start+Length: ", row.Start+row.Length, "| Row X: ", row.Rectangle.X, "| Row Y: ", row.Rectangle.Y, "| Row Width: ", row.Rectangle.Width, "| Row Height: ", row.Rectangle.Height)
 	}
+	logger.Println("Piece table PiecesAmount: ", e.PieceTable.PiecesAmount())
 
 	// -----------------------------------
 
@@ -501,6 +502,10 @@ func (e *Editor) Insert(index int, text Sequence) {
 func (e *Editor) Delete(index int, length int) {
 	e.AddAction(DELETE)
 	// TODO: Add suport to multichar deletion
+	// things to keep in mind:
+	// - Multichar deletion may affect another row, maybe more than 2
+	// - Multichar deletion may only occur when there's text selected 
+	// 	 So MAYBE where the cursor stop is where it will end up
 	sequence, _, _ := e.PieceTable.GetSequence(uint(e.Cursor.CurrentIndex)-1, uint(length))
 	sequenceRectangle := e.SequenceRectangle(sequence)
 	e.PieceTable.Delete(uint(index), uint(length))

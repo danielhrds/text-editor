@@ -209,7 +209,8 @@ func (pt *PieceTable) FindPiece(position uint) (*Piece, uint, uint, uint, error)
 			startPosition -= piece.Length
 			endPosition = startPosition + piece.Length
 			if startPosition <= position {
-				return piece, startPosition, endPosition, uint(i), nil
+				// i dont know if im right but the endPosition should be endPosition-1 i think
+				return piece, startPosition, endPosition-1, uint(i), nil
 			}
 		}
 	}
@@ -303,17 +304,16 @@ func (pt *PieceTable) Insert(position uint, text Sequence) error {
 		return fmt.Errorf("Insert: error trying to insert string at position > Length")
 	}
 
+	foundPiece, foundPieceStartPosition, foundPieceEndPosition, index, err := pt.FindPiece(position)
+	if err != nil {
+		return err
+	}
 	pt.AddBuffer = append(pt.AddBuffer, text...)
 
 	piece := &Piece{
 		Start:      start,
 		Length:     length,
 		isOriginal: false,
-	}
-
-	foundPiece, foundPieceStartPosition, foundPieceEndPosition, index, err := pt.FindPiece(position)
-	if err != nil {
-		return err
 	}
 
 	switch position {
@@ -325,12 +325,11 @@ func (pt *PieceTable) Insert(position uint, text Sequence) error {
 		pt.Pieces.Append(piece)
 	case foundPieceStartPosition:
 		// insert before foundPiece
-		// pt.Pieces = slices.Insert(pt.Pieces, int(index), piece)
 		pt.Pieces.InsertAt(piece, int(index))
 	case foundPieceEndPosition:
 		// insert after foundPiece
-		// pt.Pieces = slices.Insert(pt.Pieces, int(index+1), piece)
-		pt.Pieces.InsertAt(piece, int(index+1))
+		// pt.Pieces.InsertAt(piece, int(index+1))
+		foundPiece.Length += length
 	default:
 		// I will try to give an example to remind me later because I know I will forget
 		// If text is "_______________" Length 15

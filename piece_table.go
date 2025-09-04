@@ -1,7 +1,7 @@
 package main
 
 // Implement ToString cache
-// - Invalidate cache if an Insert or Delete occurs 
+// - Invalidate cache if an Insert or Delete occurs
 
 import (
 	"fmt"
@@ -14,6 +14,7 @@ import (
 
 // ----------- DEBUG -----------
 var logger = log.New(os.Stdout, "\033[33m[DEBUG]\033[0m ", 0)
+
 // -----------------------------
 
 // I didn't want to put Iterators methods in the Collection interface
@@ -88,32 +89,39 @@ func (pt *PieceTable) ToString() string {
 	return string(sequence)
 }
 
+func (pt *PieceTable) GetPiecesString(pieces []*Piece) string {
+	str := ""
+	for _, piece := range pieces {
+		if piece.isOriginal {
+			str += string(pt.OriginalBuffer[piece.Start : piece.Start+piece.Length])
+		} else {
+			str += string(pt.AddBuffer[piece.Start : piece.Start+piece.Length])
+		}
+	}
+	return str
+}
+
+// sequence, startPosition,
 func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, error) {
 	sequence := Sequence{}
 	pieces, _, startPosition, err := pt.FindPieces(position, length)
 	if err != nil {
 		return Sequence{}, 0, err
 	}
+	
 	trackLength := 0
-	// if pieces[0].isOriginal {
-	// 	logger.Println(string(pt.OriginalBuffer[pieces[0].Start:pieces[0].Length]))
-	// } else {
-	// 	logger.Println(string(pt.AddBuffer[pieces[0].Start:pieces[0].Length]))
-	// }
 	for i, piece := range pieces {
 		start, end := piece.Start, piece.Start+piece.Length
 		if i == 0 {
-			start += position-startPosition
+			start += position - startPosition
+		}
+		if len(pieces) > 1 && i == len(pieces)-1 {
+			end = piece.Start + (length - uint(trackLength))
 		}
 
-		// logger.Println(position-startPosition)
-		// logger.Println(end-start)
-		// if end-start < length {
-		// 	end += length
-		// }
 		isGreaterThanLength := end-start > length
 		if isGreaterThanLength {
-			end = start + (length-uint(trackLength))
+			end = start + (length - uint(trackLength))
 		}
 		if piece.isOriginal {
 			sequence = append(sequence, pt.OriginalBuffer[start:end]...)
@@ -121,16 +129,18 @@ func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, e
 		if !piece.isOriginal {
 			sequence = append(sequence, pt.AddBuffer[start:end]...)
 		}
-		trackLength += int(end-start)
+		trackLength += int(end - start)
 		if trackLength == int(length) {
-			// end -= (uint(len(sequence)) + piece.Length)-length
-			break
+			return sequence, startPosition, nil
 		}
 		startPosition += piece.Length
-		// logger.Println(string(sequence))
 	}
 
-	return sequence, startPosition, nil
+	if trackLength > int(length) {
+		logger.Println("GetSequence: trackLength > length. Should be trackLength == length")
+	}
+
+	return Sequence{}, 0, fmt.Errorf("GetSequence: error trying to find sequence")
 }
 
 func (pt *PieceTable) GetAt(position uint) (rune, error) {
@@ -155,7 +165,6 @@ func (pt *PieceTable) GetAt(position uint) (rune, error) {
 	}
 	return char, nil
 }
-
 
 func (pt *PieceTable) PrintPosition(position uint) (string, error) {
 	if position > pt.Length {
@@ -196,7 +205,7 @@ func (pt *PieceTable) FindPiece(position uint) (*Piece, uint, uint, uint, error)
 		var endPosition uint
 		for i, piece := range pt.Pieces.Forward() {
 			endPosition += piece.Length
-			if endPosition > position {
+			if endPosition >= position {
 				return piece, startPosition, endPosition, uint(i), nil
 			}
 			startPosition = endPosition
@@ -208,9 +217,9 @@ func (pt *PieceTable) FindPiece(position uint) (*Piece, uint, uint, uint, error)
 		for i, piece := range pt.Pieces.Backward() {
 			startPosition -= piece.Length
 			endPosition = startPosition + piece.Length
-			if startPosition <= position {
+			if startPosition < position {
 				// i dont know if im right but the endPosition should be endPosition-1 i think
-				return piece, startPosition, endPosition-1, uint(i), nil
+				return piece, startPosition, endPosition, uint(i), nil
 			}
 		}
 	}
@@ -254,7 +263,7 @@ func (pt *PieceTable) FindPieces(position uint, length uint) ([]*Piece, int, uin
 		var endPosition uint
 		var endPositionBeforeSwitchPiece uint
 		for i, piece := range pt.Pieces.Forward() {
-			if endPosition > position && endPosition > position+length {
+			if endPosition > position && endPosition >= position+length {
 				break
 			}
 
@@ -327,9 +336,16 @@ func (pt *PieceTable) Insert(position uint, text Sequence) error {
 		// insert before foundPiece
 		pt.Pieces.InsertAt(piece, int(index))
 	case foundPieceEndPosition:
-		// insert after foundPiece
-		// pt.Pieces.InsertAt(piece, int(index+1))
-		foundPiece.Length += length
+		// insert after foundPiece or increases piece's Length
+		// Why? otherwise it would add a new piece every time.
+		// Since the new sequence is added to the AddBuffer,
+		// I'm assuming it's safe to just increase the piece's length
+		// when it's not original
+		if foundPiece.isOriginal {
+			pt.Pieces.InsertAt(piece, int(index)+1)
+		} else {
+			foundPiece.Length += length
+		}
 	default:
 		// I will try to give an example to remind me later because I know I will forget
 		// If text is "_______________" Length 15
@@ -458,14 +474,14 @@ func (pt *PieceTable) Delete(position uint, length uint) error {
 		}
 		// piece.Length = piece.Length - length
 		// delete at the middle of a piece
-		endPosition := startPosition+piece.Length
+		endPosition := startPosition + piece.Length
 		if position != endPosition {
 			// lengthBeforeChange := piece.Length
 			piece.Length = position - startPosition
-			newPieceStart := piece.Start+1+(position-startPosition)
+			newPieceStart := piece.Start + 1 + (position - startPosition)
 			newPiece := &Piece{
-				Start: newPieceStart,
-				Length: endPosition-(position+1),
+				Start:      newPieceStart,
+				Length:     endPosition - (position + 1),
 				isOriginal: piece.isOriginal,
 			}
 			pt.Pieces.InsertAt(newPiece, index+1)

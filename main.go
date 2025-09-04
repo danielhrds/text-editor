@@ -98,10 +98,10 @@ func (w *Window) Draw() {
 	rl.DrawText("Current position: "+strconv.Itoa(w.Editor.Cursor.CurrentIndex), w.Width/2, w.Height/2+30, 20, rl.Pink)
 	rl.DrawText(
 		"Row: "+strconv.Itoa(w.Editor.Cursor.Row)+
-		" | Start: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Start)+
-		" | Length: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Length)+
-		" | AutoNewLine: "+strconv.FormatBool(currentRow.AutoNewLine), 
-		w.Width/2, 
+			" | Start: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Start)+
+			" | Length: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Length)+
+			" | AutoNewLine: "+strconv.FormatBool(currentRow.AutoNewLine),
+		w.Width/2,
 		w.Height/2+60,
 		20,
 		rl.Pink,
@@ -136,26 +136,18 @@ func (w *Window) Input() {
 		if rl.IsKeyPressed(rl.KeyRight) {
 			fmt.Println("Right")
 			w.Editor.MoveCursorForward()
-			// w.Editor.AddAction(CURSOR_MOVE)
-			// w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex + 1)
 		}
 		if rl.IsKeyPressed(rl.KeyLeft) {
 			fmt.Println("Left")
 			w.Editor.MoveCursorBackward()
-			// w.Editor.AddAction(CURSOR_MOVE)
-			// w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex - 1)
 		}
 		if rl.IsKeyPressed(rl.KeyUp) {
 			fmt.Println("Up")
 			w.Editor.MoveCursorUpward()
-			// w.Editor.AddAction(CURSOR_MOVE)
-			// w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex - 1)
 		}
 		if rl.IsKeyPressed(rl.KeyDown) {
 			fmt.Println("Down")
 			w.Editor.MoveCursorDownward()
-			// w.Editor.AddAction(CURSOR_MOVE)
-			// w.Editor.SetCursorPositionFromIndex(w.Editor.Cursor.CurrentIndex - 1)
 		}
 
 		// // @keyboard input
@@ -174,16 +166,39 @@ func (w *Window) Input() {
 	}
 
 	// @mouse input
-	// if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-	// 	mouseClickPosition := rl.GetMousePosition()
-	// 	horizontalBoundaries := mouseClickPosition.X >= w.Editor.Rectangle.X && mouseClickPosition.X <= w.Editor.Rectangle.X+w.Editor.Rectangle.Width
-	// 	verticalBoundaries := mouseClickPosition.Y >= w.Editor.Rectangle.Y && mouseClickPosition.Y <= w.Editor.Rectangle.Y+w.Editor.Rectangle.Height
-	// 	if horizontalBoundaries && verticalBoundaries {
-	// 		w.Editor.InFocus = true
-	// 		w.Editor.SetCursorPositionFromClick(mouseClickPosition)
-	// 	}
-	// 	w.Editor.AddAction(MOUSE_LEFT_CLICK)
-	// }
+	if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+		mouseClickPosition := rl.GetMousePosition()
+		rowIndex, row, _, column, index, xPosition, previousChar := w.Editor.FindRowClickMetadata(mouseClickPosition)
+		if row != nil {
+			w.Editor.Cursor.SetPosition(
+				index,
+				xPosition,
+				row.Rectangle.Y,
+				rowIndex,
+				column,
+			)
+			w.Editor.PreviousCharacter = previousChar
+		}
+		if row == nil {
+			lastRow := w.Editor.LastRow()
+			index := lastRow.Start + lastRow.Length
+			column := lastRow.Length
+			if !lastRow.AutoNewLine {
+				index--
+				column--
+			}
+			previousChar, _ := w.Editor.PieceTable.GetAt(uint(index - 1))
+			w.Editor.PreviousCharacter = previousChar
+			xPosition := lastRow.Rectangle.X + lastRow.Rectangle.Width
+			w.Editor.Cursor.SetPosition(
+				index,
+				xPosition,
+				lastRow.Rectangle.Y,
+				len(w.Editor.Rows)-1,
+				column,
+			)
+		}
+	}
 	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
 		// w.Editor.SetCursorPosition(33)
 

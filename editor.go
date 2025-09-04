@@ -100,7 +100,7 @@ type Editor struct {
 	FontSize            int
 	FontColor           rl.Color
 	PreviousCharacter   rune
-	LastRow             int
+	LastRowVisited      int
 	Actions             []Action
 }
 
@@ -124,6 +124,14 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 func (e *Editor) Index() int {
 	currentRow := e.Rows[e.Cursor.Row]
 	return currentRow.Start + e.Cursor.Column
+}
+
+func (e *Editor) FirstRow() *Row {
+	return e.Rows[0]
+}
+
+func (e *Editor) LastRow() *Row {
+	return e.Rows[len(e.Rows)-1]
 }
 
 func (e *Editor) PreviousRow() (*Row, error) {
@@ -163,7 +171,7 @@ func (e *Editor) CharRectangle(char rune) rl.Vector2 {
 	}
 	charSize := rl.MeasureTextEx(*e.Font, string(char), float32(e.FontSize), 0)
 	if char == '\n' {
-		charSize.Y = 30 // hardcoded for now
+		charSize.Y = 30 // hardcoded for now, maybe the correct is to assign it the row's height mean
 	}
 	e.CharRecCache[char] = charSize
 	return charSize
@@ -342,6 +350,53 @@ func (e *Editor) FindWidthByRowColumn(row int, column int) float32 {
 	return width
 }
 
+// returns: rowIndex, row, inXBounds, column, index, columnXPosition, previousChar
+func (e *Editor) FindRowClickMetadata(mouseClick rl.Vector2) (int, *Row, bool, int, int, float32, rune) {
+	for i, row := range e.Rows {
+		inRowXBoundaries := mouseClick.X >= row.Rectangle.X && mouseClick.X <= row.Rectangle.X+row.Rectangle.Width
+		inRowYBoundaries := mouseClick.Y >= row.Rectangle.Y && mouseClick.Y <= row.Rectangle.Y+row.Rectangle.Height
+		if inRowXBoundaries && inRowYBoundaries {
+			sequence, _, _ := e.PieceTable.GetSequence(uint(row.Start), uint(row.Length))
+			// if err != nil {
+			// 	return
+			// }
+			var previousCharacter rune
+			var previousCharacterX float32
+			column := 0
+			currentIndex := row.Start
+			charXPosition := row.Rectangle.X
+			for _, char := range sequence {
+				if char == '\n' {
+					break
+				}
+				charSize := e.CharRectangle(char)
+				betweenPostPreviousCharHalfAndPreCharHalf := mouseClick.X > previousCharacterX && mouseClick.X < charXPosition+(charSize.X/2)
+				if betweenPostPreviousCharHalfAndPreCharHalf || char == '\n' && i == len(sequence) {
+					break
+				}
+				previousCharacter = char
+				previousCharacterX = charXPosition
+				charXPosition += charSize.X
+				currentIndex++
+				column++
+			}
+			return i, row, true, column, currentIndex, charXPosition, previousCharacter
+		}
+		// if it isn't on row X boundaries, it makes no sense to search the metadata
+		if inRowYBoundaries {
+			index := row.Start + row.Length
+			column := row.Length
+			if !row.AutoNewLine {
+				index--
+				column--
+			}
+			previousChar, _ := e.PieceTable.GetAt(uint(index - 1))
+			return i, row, false, column, index, row.Rectangle.X + row.Rectangle.Width, previousChar
+		}
+	}
+	return -1, nil, false, -1, -1, -1, -1
+}
+
 func (e *Editor) MoveCursorForward() {
 	if e.Cursor.CurrentIndex == int(e.PieceTable.Length)-1 {
 		return
@@ -369,7 +424,7 @@ func (e *Editor) MoveCursorForward() {
 		}
 		nextRow, _ := e.NextRow()
 		e.Cursor.Rectangle.Y = nextRow.Rectangle.Y
-		e.LastRow = e.Cursor.Row
+		e.LastRowVisited = e.Cursor.Row
 		e.Cursor.Row++
 	}
 }
@@ -390,7 +445,7 @@ func (e *Editor) MoveCursorBackward() {
 		if !previousRow.AutoNewLine {
 			newColumn--
 		}
-		e.LastRow = e.Cursor.Row
+		e.LastRowVisited = e.Cursor.Row
 		e.Cursor.SetPosition(
 			e.Cursor.CurrentIndex,
 			e.Rectangle.X+previousRow.Rectangle.Width,
@@ -415,7 +470,7 @@ func (e *Editor) MoveCursorBackward() {
 }
 
 func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
-	e.LastRow = e.Cursor.Row
+	e.LastRowVisited = e.Cursor.Row
 	var row *Row
 	var lastCursorPosition CursorPosition
 	var ok bool
@@ -523,7 +578,7 @@ func (e *Editor) MoveCursorDownward() {
 // 		if e.Cursor.Row < len(e.Rows) {
 // 			nextRow, _ := e.NextRow()
 // 			e.Cursor.Rectangle.Y = nextRow.Rectangle.Y
-// 			e.LastRow = e.Cursor.Row
+// 			e.LastRowVisited = e.Cursor.Row
 // 			e.Cursor.Row++
 // 		}
 // 		// if e.LastAction() == TYPING {
@@ -543,7 +598,7 @@ func (e *Editor) MoveCursorDownward() {
 // 	// shouldGoToPreviousRow := previousRow.Start != -1 && e.Cursor.Column == previousRow.Start+previousRow.Length
 // 	if shouldGoToPreviousRow && e.Cursor.Row > 0 {
 // 		previousRow, _ := e.PreviousRow()
-// 		e.LastRow = e.Cursor.Row
+// 		e.LastRowVisited = e.Cursor.Row
 
 // 		newColumn := previousRow.Length
 // 		if e.Cursor.Row-1 > 0 {
@@ -758,7 +813,7 @@ func (e *Editor) MoveCursorDownward() {
 // 		// 	newColumn -= 1
 // 		// 	newCurrentIndex -= 1
 // 		// }
-// 		e.LastRow = e.Cursor.Row
+// 		e.LastRowVisited = e.Cursor.Row
 // 		e.Cursor.SetPosition(
 // 			e.Cursor.CurrentIndex-1,
 // 			rowBeforeCalc.Rectangle.Width,

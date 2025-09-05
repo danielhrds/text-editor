@@ -117,6 +117,7 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 		InFocus:         false,
 		Cursor:          NewCursor(rl.NewRectangle(rectangle.X, rectangle.Y, 3, float32(fontSize)), 0, 0),
 		Rows:            make([]*Row, 0),
+		LastCursorPositions: make(map[int]CursorPosition),
 		CharRecCache:    make(map[rune]rl.Vector2),
 	}
 }
@@ -345,21 +346,20 @@ func (e *Editor) FindWidthByRowColumn(row int, column int) float32 {
 		}
 		charSize := e.CharRectangle(char)
 		width += charSize.X
-		fmt.Println(i, string(char))
 	}
 	return width
 }
 
-// returns: rowIndex, row, inXBounds, column, index, columnXPosition, previousChar
-func (e *Editor) FindRowClickMetadata(mouseClick rl.Vector2) (int, *Row, bool, int, int, float32, rune) {
+// returns: rowIndex, row, inXBounds, column, index, columnXPosition, previousChar, error
+func (e *Editor) FindRowClickMetadata(mouseClick rl.Vector2) (int, *Row, bool, int, int, float32, rune, error) {
 	for i, row := range e.Rows {
 		inRowXBoundaries := mouseClick.X >= row.Rectangle.X && mouseClick.X <= row.Rectangle.X+row.Rectangle.Width
 		inRowYBoundaries := mouseClick.Y >= row.Rectangle.Y && mouseClick.Y <= row.Rectangle.Y+row.Rectangle.Height
 		if inRowXBoundaries && inRowYBoundaries {
-			sequence, _, _ := e.PieceTable.GetSequence(uint(row.Start), uint(row.Length))
-			// if err != nil {
-			// 	return
-			// }
+			sequence, _, err := e.PieceTable.GetSequence(uint(row.Start), uint(row.Length))
+			if err != nil {
+				return -1, nil, false, -1, -1, -1, -1, err
+			}
 			var previousCharacter rune
 			var previousCharacterX float32
 			column := 0
@@ -380,7 +380,7 @@ func (e *Editor) FindRowClickMetadata(mouseClick rl.Vector2) (int, *Row, bool, i
 				currentIndex++
 				column++
 			}
-			return i, row, true, column, currentIndex, charXPosition, previousCharacter
+			return i, row, true, column, currentIndex, charXPosition, previousCharacter, nil
 		}
 		// if it isn't on row X boundaries, it makes no sense to search the metadata
 		if inRowYBoundaries {
@@ -391,16 +391,17 @@ func (e *Editor) FindRowClickMetadata(mouseClick rl.Vector2) (int, *Row, bool, i
 				column--
 			}
 			previousChar, _ := e.PieceTable.GetAt(uint(index - 1))
-			return i, row, false, column, index, row.Rectangle.X + row.Rectangle.Width, previousChar
+			return i, row, false, column, index, row.Rectangle.X + row.Rectangle.Width, previousChar, nil
 		}
 	}
-	return -1, nil, false, -1, -1, -1, -1
+	return -1, nil, false, -1, -1, -1, -1, nil
 }
 
 func (e *Editor) MoveCursorForward() {
 	if e.Cursor.CurrentIndex == int(e.PieceTable.Length)-1 {
 		return
 	}
+	clear(e.LastCursorPositions)
 	currentChar, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex))
 	currentRow := e.Rows[e.Cursor.Row]
 	charSize := e.CharRectangle(currentChar)
@@ -417,6 +418,7 @@ func (e *Editor) MoveCursorForward() {
 			e.Cursor.Column+1,
 		)
 	} else {
+		e.LastRowVisited = e.Cursor.Row
 		e.Cursor.Column = 0
 		e.Cursor.Rectangle.X = e.Rectangle.X
 		if isNewLine {
@@ -424,7 +426,6 @@ func (e *Editor) MoveCursorForward() {
 		}
 		nextRow, _ := e.NextRow()
 		e.Cursor.Rectangle.Y = nextRow.Rectangle.Y
-		e.LastRowVisited = e.Cursor.Row
 		e.Cursor.Row++
 	}
 }
@@ -433,10 +434,12 @@ func (e *Editor) MoveCursorBackward() {
 	if e.Cursor.CurrentIndex == 0 {
 		return
 	}
+	clear(e.LastCursorPositions)
 	previousCharacter, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex - 1))
 	e.Cursor.Column--
 	shouldGoToPreviousRow := e.Cursor.Column < 0
 	if shouldGoToPreviousRow && e.Cursor.Row > 0 {
+		e.LastRowVisited = e.Cursor.Row
 		previousRow, _ := e.PreviousRow()
 		newColumn := previousRow.Length
 		// if e.Cursor.Row-1 > 0 {
@@ -445,7 +448,6 @@ func (e *Editor) MoveCursorBackward() {
 		if !previousRow.AutoNewLine {
 			newColumn--
 		}
-		e.LastRowVisited = e.Cursor.Row
 		e.Cursor.SetPosition(
 			e.Cursor.CurrentIndex,
 			e.Rectangle.X+previousRow.Rectangle.Width,
@@ -492,6 +494,7 @@ func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
 		lastCursorPosition, ok = e.LastCursorPositions[e.Cursor.Row+1]
 		newRow = e.Cursor.Row + 1
 		newCurrentIndex = e.Cursor.CurrentIndex + (e.CurrentRow().Length - e.Cursor.Column + e.Cursor.Column)
+		shouldDecreaseColumnAndIndex = !row.AutoNewLine
 	}
 	if ok {
 		e.Cursor.SetPosition(
@@ -502,6 +505,13 @@ func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
 			lastCursorPosition.Column,
 		)
 	} else if e.Cursor.Column >= row.Length {
+		// lastCursorPositionColumn := e.Cursor.Column
+		e.LastCursorPositions[e.Cursor.Row] = CursorPosition{
+			Position: rl.Vector2{X: e.Cursor.Rectangle.X, Y: e.Cursor.Rectangle.Y},
+			Row: e.Cursor.Row,
+			Column: e.Cursor.Column,
+			CurrentIndex: e.Cursor.CurrentIndex,
+		}
 		newColumn := row.Length
 		newCurrentIndex := row.Start + row.Length
 		if shouldDecreaseColumnAndIndex {
@@ -539,6 +549,45 @@ func (e *Editor) MoveCursorDownward() {
 		return
 	}
 	e._internalMoveCursorBackwardAndDownward(1)
+}
+
+func (e *Editor) SetCursorPositionByClick(mouseClick rl.Vector2) error {
+	rowIndex, row, _, column, index, xPosition, previousChar, err := e.FindRowClickMetadata(mouseClick)
+	if err != nil {
+		return err
+	}
+	e.LastRowVisited = e.Cursor.Row
+	clear(e.LastCursorPositions)
+	if row != nil {
+		e.Cursor.SetPosition(
+			index,
+			xPosition,
+			row.Rectangle.Y,
+			rowIndex,
+			column,
+		)
+		e.PreviousCharacter = previousChar
+	}
+	if row == nil {
+		lastRow := e.LastRow()
+		index := lastRow.Start + lastRow.Length
+		column := lastRow.Length
+		if !lastRow.AutoNewLine {
+			index--
+			column--
+		}
+		previousChar, _ := e.PieceTable.GetAt(uint(index - 1))
+		e.PreviousCharacter = previousChar
+		xPosition := lastRow.Rectangle.X + lastRow.Rectangle.Width
+		e.Cursor.SetPosition(
+			index,
+			xPosition,
+			lastRow.Rectangle.Y,
+			len(e.Rows)-1,
+			column,
+		)
+	}
+	return nil
 }
 
 // func (e *Editor) FindRowFromPosition(mouseClickPosition rl.Vector2) (*Row, int) {

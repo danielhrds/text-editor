@@ -129,79 +129,32 @@ func (w *Window) Draw() {
 
 func (w *Window) Input() {
 	// if w.Editor.InFocus {
-	if true {
+	if true { // this should be on editor struct like editor.update()
 		// char := rl.GetCharPressed()
 
 		// @arrow input
-		if rl.IsKeyPressed(rl.KeyRight) {
-			fmt.Println("Right")
+		if rl.IsKeyDown(rl.KeyRight) {
 			w.Editor.MoveCursorForward()
 		}
-		if rl.IsKeyPressed(rl.KeyLeft) {
-			fmt.Println("Left")
+		if rl.IsKeyDown(rl.KeyLeft) {
 			w.Editor.MoveCursorBackward()
 		}
-		if rl.IsKeyPressed(rl.KeyUp) {
-			fmt.Println("Up")
+		if rl.IsKeyDown(rl.KeyUp) {
 			w.Editor.MoveCursorUpward()
 		}
-		if rl.IsKeyPressed(rl.KeyDown) {
-			fmt.Println("Down")
+		if rl.IsKeyDown(rl.KeyDown) {
 			w.Editor.MoveCursorDownward()
 		}
-
-		// // @keyboard input
-		// if rl.IsKeyPressed(rl.KeyBackspace) && w.Editor.Cursor.CurrentIndex > 0 {
-		// 	_ = w.Editor.Delete(w.Editor.Cursor.CurrentIndex-1, 1) // Unhandled delete error
-		// }
-
-		// if char > 0 {
-		// 	logger.Println(char, string(char), w.Editor.Cursor.CurrentIndex, []rune{char})
-		// 	w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{char})
-		// }
-
-		// if rl.IsKeyPressed(rl.KeyEnter) {
-		// 	w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{'\n'})
-		// }
 	}
 
 	// @mouse input
 	if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-		mouseClickPosition := rl.GetMousePosition()
-		rowIndex, row, _, column, index, xPosition, previousChar := w.Editor.FindRowClickMetadata(mouseClickPosition)
-		if row != nil {
-			w.Editor.Cursor.SetPosition(
-				index,
-				xPosition,
-				row.Rectangle.Y,
-				rowIndex,
-				column,
-			)
-			w.Editor.PreviousCharacter = previousChar
-		}
-		if row == nil {
-			lastRow := w.Editor.LastRow()
-			index := lastRow.Start + lastRow.Length
-			column := lastRow.Length
-			if !lastRow.AutoNewLine {
-				index--
-				column--
-			}
-			previousChar, _ := w.Editor.PieceTable.GetAt(uint(index - 1))
-			w.Editor.PreviousCharacter = previousChar
-			xPosition := lastRow.Rectangle.X + lastRow.Rectangle.Width
-			w.Editor.Cursor.SetPosition(
-				index,
-				xPosition,
-				lastRow.Rectangle.Y,
-				len(w.Editor.Rows)-1,
-				column,
-			)
+		err := w.Editor.SetCursorPositionByClick(rl.GetMousePosition())
+		if err != nil {
+			log.Fatal("Mouse right click: ", err)
 		}
 	}
 	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
-		// w.Editor.SetCursorPosition(33)
-
 		// ------------ Debugging ------------
 
 		logger.Println("")

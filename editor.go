@@ -132,6 +132,25 @@ func (e *Editor) Index() int {
 	return currentRow.Start + e.Cursor.Column
 }
 
+func (e *Editor) PreviousChar() (rune, error) {
+	if e.Cursor.CurrentIndex <= 0 {
+		return -1, fmt.Errorf("PreviousChar: error trying to get previous char. current index <= 0")
+	}
+	previous, err := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex - 1))
+	if err != nil {
+		return -1, err
+	}
+	return previous, nil
+}
+
+func (e *Editor) CurrentChar() (rune, error) {
+	currentChar, err := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex))
+	if err != nil {
+		return -1, err
+	}
+	return currentChar, nil
+}
+
 func (e *Editor) FirstRow() *Row {
 	return e.Rows[0]
 }
@@ -337,7 +356,7 @@ func (e *Editor) SetFontSize(fontSize int) {
 	e.Cursor.Rectangle.Height = float32(fontSize)
 }
 
-func (e *Editor) FindWidthByRowColumn(row int, column int) float32 {
+func (e *Editor) FindPositionByRowColumn(row int, column int) float32 {
 	rowToSearch := e.Rows[row]
 	sequence, _, err := e.PieceTable.GetSequence(uint(rowToSearch.Start), uint(rowToSearch.Length))
 
@@ -407,8 +426,8 @@ func (e *Editor) MoveCursorForward() {
 		return
 	}
 	clear(e.LastCursorPositions)
-	currentChar, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex))
-	currentRow := e.Rows[e.Cursor.Row]
+	currentChar, _ := e.CurrentChar()
+	currentRow := e.CurrentRow()
 	charSize := e.CharRectangle(currentChar)
 	isEndOfRow := e.Cursor.Column == currentRow.Length
 	isNewLine := currentChar == '\n'
@@ -440,43 +459,36 @@ func (e *Editor) MoveCursorBackward() {
 		return
 	}
 	clear(e.LastCursorPositions)
-	previousCharacter, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex - 1))
-	e.Cursor.Column--
-	shouldGoToPreviousRow := e.Cursor.Column < 0
-	if shouldGoToPreviousRow && e.Cursor.Row > 0 {
+	currentChar, _ := e.CurrentChar()
+	shouldGoToPreviousRow := e.Cursor.Column == 0 && e.Cursor.Row > 0
+	if shouldGoToPreviousRow {
 		e.LastRowVisited = e.Cursor.Row
 		previousRow, _ := e.PreviousRow()
 		newColumn := previousRow.Length
-		// if e.Cursor.Row-1 > 0 {
-		// 	newColumn -= 1
-		// }
+		newCurrentIndex := e.Cursor.CurrentIndex
 		if !previousRow.AutoNewLine {
 			newColumn--
+			newCurrentIndex--
 		}
 		e.Cursor.SetPosition(
-			e.Cursor.CurrentIndex,
+			newCurrentIndex,
 			e.Rectangle.X+previousRow.Rectangle.Width,
 			previousRow.Rectangle.Y,
 			e.Cursor.Row-1,
 			newColumn,
 		)
-
-		isPreviousIndexFromPreviousRow := e.Cursor.CurrentIndex-1 >= previousRow.Start && e.Cursor.CurrentIndex-1 < previousRow.Start+previousRow.Length
-		// if isPreviousIndexFromPreviousRow {
-		// 	e.Cursor.Column--
-		// }
-		isNewLineFromPreviousRow := previousCharacter == '\n'
-		if isPreviousIndexFromPreviousRow && isNewLineFromPreviousRow {
-			e.Cursor.CurrentIndex--
-		}
 	} else {
-		charSize := e.CharRectangle(e.PreviousCharacter)
+		previousCharacter, _ := e.PreviousChar()
+		fmt.Println(string(previousCharacter))
+		charSize := e.CharRectangle(previousCharacter)
 		e.Cursor.Rectangle.X -= charSize.X
 		e.Cursor.CurrentIndex--
+		e.Cursor.Column--
 	}
+	e.PreviousCharacter = currentChar
 }
 
-func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
+func (e *Editor) _internalMoveCursorBackwardOrDownward(direction int) {
 	e.LastRowVisited = e.Cursor.Row
 	var row *Row
 	var lastCursorPosition CursorPosition
@@ -508,7 +520,6 @@ func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
 			lastCursorPosition.Column,
 		)
 	} else if e.Cursor.Column >= row.Length {
-		// lastCursorPositionColumn := e.Cursor.Column
 		e.LastCursorPositions[e.Cursor.Row] = CursorPosition{
 			Position:     rl.Vector2{X: e.Cursor.Rectangle.X, Y: e.Cursor.Rectangle.Y},
 			Row:          e.Cursor.Row,
@@ -529,7 +540,7 @@ func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
 			newColumn,
 		)
 	} else {
-		newX := e.FindWidthByRowColumn(newRow, e.Cursor.Column)
+		newX := e.FindPositionByRowColumn(newRow, e.Cursor.Column)
 		e.Cursor.SetPosition(
 			newCurrentIndex,
 			newX,
@@ -544,14 +555,14 @@ func (e *Editor) MoveCursorUpward() {
 	if e.Cursor.Row == 0 {
 		return
 	}
-	e._internalMoveCursorBackwardAndDownward(-1)
+	e._internalMoveCursorBackwardOrDownward(UPWARD)
 }
 
 func (e *Editor) MoveCursorDownward() {
 	if e.Cursor.Row >= len(e.Rows)-1 {
 		return
 	}
-	e._internalMoveCursorBackwardAndDownward(1)
+	e._internalMoveCursorBackwardOrDownward(DOWNWARD)
 }
 
 func (e *Editor) SetCursorPositionByClick(mouseClick rl.Vector2) error {
@@ -572,6 +583,7 @@ func (e *Editor) SetCursorPositionByClick(mouseClick rl.Vector2) error {
 		e.PreviousCharacter = previousChar
 	}
 	if row == nil {
+		// TODO: it needs to be within editor boundaries, if not, return
 		lastRow := e.LastRow()
 		index := lastRow.Start + lastRow.Length
 		column := lastRow.Length
@@ -603,7 +615,7 @@ func (e *Editor) SetCursorPositionByClick(mouseClick rl.Vector2) error {
 // }
 
 // func (e *Editor) MoveCursorForward() {
-// 	currentChar, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex))
+// 	currentChar, _ := e.CurrentChar()
 // 	currentRow := e.Rows[e.Cursor.Row]
 // 	isEndOfRow := e.Cursor.Column >= currentRow.Length || e.Cursor.Column >= currentRow.Length && e.LastAction() == TYPING
 // 	isNewLine := currentChar == '\n'
@@ -640,7 +652,7 @@ func (e *Editor) SetCursorPositionByClick(mouseClick rl.Vector2) error {
 // }
 
 // func (e *Editor) MoveCursorBackward() {
-// 	previousCharacter, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex - 1))
+// 	previousCharacter, _ := e.PreviousChar()
 // 	previousRow := &Row{Start: -1}
 // 	if e.Cursor.Row > 0 {
 // 		previousRow, _ = e.PreviousRow()

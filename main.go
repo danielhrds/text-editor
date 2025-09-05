@@ -19,7 +19,7 @@ func main() {
 	rl.SetWindowState(rl.FlagWindowAlwaysRun)
 	rl.SetTargetFPS(window.FPS)
 
-	original, _ := ReadFile("example2.txt")
+	original, _ := ReadFile("example.txt")
 	pt := NewPieceTable(
 		Sequence(original),
 	)

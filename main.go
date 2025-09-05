@@ -1,7 +1,3 @@
-// TODO:
-// - Cache
-// - Refactor piece table delete function
-
 package main
 
 import (
@@ -23,11 +19,11 @@ func main() {
 	rl.SetWindowState(rl.FlagWindowAlwaysRun)
 	rl.SetTargetFPS(window.FPS)
 
-	original, _ := ReadFile("example.txt")
+	original, _ := ReadFile("example2.txt")
 	pt := NewPieceTable(
 		Sequence(original),
 	)
-	pt.Insert(20, Sequence("went to the park and\n"))
+	// pt.Insert(20, Sequence("went to the park and\n"))
 	logger.Println(pt.ToString())
 
 	// original, _ := ReadFile("example2.txt")
@@ -131,18 +127,19 @@ func (w *Window) Input() {
 	// if w.Editor.InFocus {
 	if true { // this should be on editor struct like editor.update()
 		// char := rl.GetCharPressed()
+		// key := rl.GetKeyPressed()
 
 		// @arrow input
-		if rl.IsKeyDown(rl.KeyRight) {
+		if rl.IsKeyPressed(rl.KeyRight) {
 			w.Editor.MoveCursorForward()
 		}
-		if rl.IsKeyDown(rl.KeyLeft) {
+		if rl.IsKeyPressed(rl.KeyLeft) {
 			w.Editor.MoveCursorBackward()
 		}
-		if rl.IsKeyDown(rl.KeyUp) {
+		if rl.IsKeyPressed(rl.KeyUp) {
 			w.Editor.MoveCursorUpward()
 		}
-		if rl.IsKeyDown(rl.KeyDown) {
+		if rl.IsKeyPressed(rl.KeyDown) {
 			w.Editor.MoveCursorDownward()
 		}
 	}

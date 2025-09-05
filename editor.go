@@ -18,6 +18,11 @@ import (
 // 	CurrentIndex: 0,
 // },
 
+const (
+	UPWARD   = -1
+	DOWNWARD = 1
+)
+
 // -1 indicates that the values are missing
 type CursorPosition struct {
 	Position                  rl.Vector2
@@ -108,17 +113,17 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 	pieceTable := NewPieceTable(Sequence{})
 	fontSize := 30
 	return Editor{
-		Rectangle:       rectangle,
-		BackgroundColor: backgroundColor,
-		PieceTable:      &pieceTable,
-		FontSize:        fontSize,
-		FontColor:       rl.White,
-		Actions:         []Action{},
-		InFocus:         false,
-		Cursor:          NewCursor(rl.NewRectangle(rectangle.X, rectangle.Y, 3, float32(fontSize)), 0, 0),
-		Rows:            make([]*Row, 0),
+		Rectangle:           rectangle,
+		BackgroundColor:     backgroundColor,
+		PieceTable:          &pieceTable,
+		FontSize:            fontSize,
+		FontColor:           rl.White,
+		Actions:             []Action{},
+		InFocus:             false,
+		Cursor:              NewCursor(rl.NewRectangle(rectangle.X, rectangle.Y, 3, float32(fontSize)), 0, 0),
+		Rows:                make([]*Row, 0),
 		LastCursorPositions: make(map[int]CursorPosition),
-		CharRecCache:    make(map[rune]rl.Vector2),
+		CharRecCache:        make(map[rune]rl.Vector2),
 	}
 }
 
@@ -480,16 +485,14 @@ func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
 	var newRow int
 	var shouldDecreaseColumnAndIndex bool = false
 
-	// upward   == -1
-	if direction == -1 {
+	if direction == UPWARD {
 		row, _ = e.PreviousRow()
 		lastCursorPosition, ok = e.LastCursorPositions[e.Cursor.Row-1]
 		newRow = e.Cursor.Row - 1
 		newCurrentIndex = e.Cursor.CurrentIndex - (e.Cursor.Column + row.Length - e.Cursor.Column)
 		shouldDecreaseColumnAndIndex = e.Cursor.Row-1 == 0 || !row.AutoNewLine
 	}
-	// downward ==  1
-	if direction == 1 {
+	if direction == DOWNWARD {
 		row, _ = e.NextRow()
 		lastCursorPosition, ok = e.LastCursorPositions[e.Cursor.Row+1]
 		newRow = e.Cursor.Row + 1
@@ -507,9 +510,9 @@ func (e *Editor) _internalMoveCursorBackwardAndDownward(direction int) {
 	} else if e.Cursor.Column >= row.Length {
 		// lastCursorPositionColumn := e.Cursor.Column
 		e.LastCursorPositions[e.Cursor.Row] = CursorPosition{
-			Position: rl.Vector2{X: e.Cursor.Rectangle.X, Y: e.Cursor.Rectangle.Y},
-			Row: e.Cursor.Row,
-			Column: e.Cursor.Column,
+			Position:     rl.Vector2{X: e.Cursor.Rectangle.X, Y: e.Cursor.Rectangle.Y},
+			Row:          e.Cursor.Row,
+			Column:       e.Cursor.Column,
 			CurrentIndex: e.Cursor.CurrentIndex,
 		}
 		newColumn := row.Length

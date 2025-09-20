@@ -89,18 +89,6 @@ func (pt *PieceTable) ToString() string {
 	return string(sequence)
 }
 
-func (pt *PieceTable) GetPiecesString(pieces []*Piece) string {
-	str := ""
-	for _, piece := range pieces {
-		if piece.isOriginal {
-			str += string(pt.OriginalBuffer[piece.Start : piece.Start+piece.Length])
-		} else {
-			str += string(pt.AddBuffer[piece.Start : piece.Start+piece.Length])
-		}
-	}
-	return str
-}
-
 // sequence, startPosition,
 func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, error) {
 	sequence := Sequence{}
@@ -164,28 +152,6 @@ func (pt *PieceTable) GetAt(position uint) (rune, error) {
 		startPosition++
 	}
 	return char, nil
-}
-
-func (pt *PieceTable) PrintPosition(position uint) (string, error) {
-	if position > pt.Length {
-		return "", fmt.Errorf("PrintPosition: error trying to print position at position > Length")
-	}
-
-	str := "\n" + pt.ToString() + "\n"
-	var i uint
-	for i = range uint(len(str) - 1) {
-		if i != position {
-			str += " "
-		} else {
-			str += "^"
-		}
-	}
-	str += "Position: " + strconv.Itoa(int(position))
-	return str, nil
-}
-
-func (pt *PieceTable) PiecesAmount() uint {
-	return uint(pt.Pieces.Size())
 }
 
 // maybe return error if position is greater than the length.
@@ -341,10 +307,11 @@ func (pt *PieceTable) Insert(position uint, text Sequence) error {
 		// Since the new sequence is added to the AddBuffer,
 		// I'm assuming it's safe to just increase the piece's length
 		// when it's not original
-		if foundPiece.isOriginal {
-			pt.Pieces.InsertAt(piece, int(index)+1)
-		} else {
+		// UPDATE: I WAS WRONG. I'M LEAVING THE COMMENT THERE AS A REMINDER
+		if int(index) == pt.Pieces.Size()-2 && !foundPiece.isOriginal {
 			foundPiece.Length += length
+		} else {
+			pt.Pieces.InsertAt(piece, int(index)+1)
 		}
 	default:
 		// I will try to give an example to remind me later because I know I will forget

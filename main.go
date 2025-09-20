@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -29,9 +30,17 @@ func main() {
 	// original, _ := ReadFile("example2.txt")
 	// original, _ := ReadFile("example3.txt")
 	// editor := NewEditor(rl.NewRectangle(20, 0, float32(window.Width-100), float32(window.Height-100)), rl.Gray)
-	// editor := NewEditor(rl.NewRectangle(0, 0, 250, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
-	editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30, 30, 30, 255))
-	font := rl.LoadFontEx("fonts/JetBrainsMono-Regular.ttf", int32(editor.FontSize), nil, 0)
+	editor := NewEditor(rl.NewRectangle(0, 0, 255, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
+	// editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30, 30, 30, 255))
+	
+	latin1 := make([]rune, 0, 255-32+1)
+	var cp rune
+	for cp = 32; cp <= 255; cp++ {
+		latin1 = append(latin1, cp)
+	}
+	font := rl.LoadFontEx("fonts/JetBrainsMono-Regular.ttf", int32(editor.FontSize), latin1, int32(len(latin1)))
+	rl.GenTextureMipmaps(&font.Texture)
+	rl.SetTextureFilter(font.Texture, rl.FilterBilinear)
 	defer rl.UnloadFont(font)
 	editor.Font = &font
 	editor.PieceTable = &pt
@@ -56,8 +65,9 @@ func ReadFile(path string) (string, int) {
 
 	scanner := bufio.NewScanner(file)
 	str := ""
-	i := 1
+	i := 0
 	for scanner.Scan() {
+		fmt.Println(scanner.Text())
 		str += scanner.Text() + "\n"
 		i++
 	}
@@ -126,7 +136,10 @@ func (w *Window) Draw() {
 func (w *Window) Input() {
 	// if w.Editor.InFocus {
 	if true { // this should be on editor struct like editor.update()
-		// char := rl.GetCharPressed()
+		char := rl.GetCharPressed()
+		if char != 0 {
+			fmt.Println(char, "string:", string(char), w.Editor.CharRectangle(char))
+		}
 		// key := rl.GetKeyPressed()
 
 		// @arrow input
@@ -141,6 +154,17 @@ func (w *Window) Input() {
 		}
 		if rl.IsKeyPressed(rl.KeyDown) {
 			w.Editor.MoveCursorDownward()
+		}
+
+		if rl.IsKeyPressed(rl.KeyR) {
+			fmt.Println("row", w.Editor.FindRowByIndex(w.Editor.Cursor.CurrentIndex))
+		}
+
+		if char != 0 {
+			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{char})
+			// w.Editor.PieceTable.Insert(uint(w.Editor.Cursor.CurrentIndex), []rune{char})
+			// w.Editor.MoveCursorForward()
+			// w.Editor.CalculateRows()
 		}
 	}
 
@@ -166,6 +190,25 @@ func (w *Window) Input() {
 		logger.Println("Cursor Y: " + strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.Y), 'f', 2, 32))
 
 		// -----------------------------------
-
+		_, err := os.Stat("output 1.txt")
+		if errors.Is(err, os.ErrNotExist) {
+			file, _ := os.Create("output 1.txt")
+			defer file.Close()
+			file.WriteString(w.Editor.PieceTable.ToString())
+		} else {
+			n := 2
+			for {
+				fileName := fmt.Sprintf("output %d.txt", n)
+				_, err := os.Stat(fileName)
+				if errors.Is(err, os.ErrNotExist) {
+					file, _ := os.Create(fileName)
+					defer file.Close()
+					file.WriteString(w.Editor.PieceTable.ToString())
+					break
+				}
+				n++
+			}
+		}
+		
 	}
 }

@@ -4,6 +4,7 @@ package main
 
 import (
 	"fmt"
+	"unicode/utf8"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
@@ -219,15 +220,18 @@ func (e *Editor) CalculateRows() {
 		false,
 	}
 
-	var lastWidth float32 = -1
-	lastSpaceIndex := -1
 	e.Rows = e.Rows[:0]
-	length := 0
 	text := e.PieceTable.ToString()
-	var i = 0
+	var lastWidth float32 = -1
+	var lastSpaceIndex int = -1
+	var length int
+	var multiByte int
+	var i int
 	for i < len(text) {
-		char := text[i]
-		charSize := e.CharRectangle(rune(char))
+		// char := text[i]
+		char, size := utf8.DecodeRuneInString(text[i:])
+		multiByte += size-1
+		charSize := e.CharRectangle(char)
 		currentRow.Rectangle.Width += charSize.X
 		length++
 		// this serves to adjust the row height to the higher character found
@@ -235,37 +239,21 @@ func (e *Editor) CalculateRows() {
 			currentRow.Rectangle.Height = charSize.Y
 		}
 
-		charPosition := currentRow.Rectangle.X + currentRow.Rectangle.Width
-		editorXBoundary := e.Rectangle.X + e.Rectangle.Width
-		charOutOfEditorBounds := charPosition+charSize.X > editorXBoundary
-
-		if char == ' ' {
-			lastSpaceIndex = i
-			lastWidth = currentRow.Rectangle.Width
-		} else if char == '\n' {
-			currentRow.Length = length
-			length = 0
-			e.Rows = append(e.Rows, currentRow)
-			currentRow = &Row{
-				i + 1,
-				0,
-				rl.NewRectangle(e.Rectangle.X, currentRow.Rectangle.Y+currentRow.Rectangle.Height, 0, 0),
-				false,
-			}
-		} else if charOutOfEditorBounds {
+		charOutOfEditorBounds := currentRow.Rectangle.Width > e.Rectangle.Width
+		if charOutOfEditorBounds {
 			newRowStart := -1
 			length = 0
 			width := float32(0)
 			if lastSpaceIndex == -1 || lastSpaceIndex < currentRow.Start {
 				// if a space isn't found within a row then we will wrap at the character
-				currentRow.Length = i - currentRow.Start
+				logger.Println("Width when splitting", currentRow.Rectangle.Width)
+				currentRow.Length = i - currentRow.Start - multiByte
 				currentRow.Rectangle.Width -= charSize.X
 				currentRow.AutoNewLine = true
 				e.Rows = append(e.Rows, currentRow)
 				newRowStart = i // might be wrong, perhaps newRowStart = i+1
 				length = 1
 				width = charSize.X
-				logger.Println("Width when splitting", currentRow.Rectangle.Width, charPosition, editorXBoundary)
 			} else {
 				// if a space is found within a row then we will wrap the whole word
 				currentRow.Length = lastSpaceIndex - currentRow.Start + 1
@@ -284,8 +272,23 @@ func (e *Editor) CalculateRows() {
 				false,
 			}
 			lastSpaceIndex = -1
+			multiByte = 0
+		} else if char == '\n' {
+			currentRow.Length = length
+			length = 0
+			e.Rows = append(e.Rows, currentRow)
+			multiByte = 0
+			currentRow = &Row{
+				i + 1,
+				0,
+				rl.NewRectangle(e.Rectangle.X, currentRow.Rectangle.Y+currentRow.Rectangle.Height, 0, 0),
+				false,
+			}
+		} else if char == ' ' {
+			lastSpaceIndex = i
+			lastWidth = currentRow.Rectangle.Width
 		}
-		i++
+		i += size
 	}
 
 	if length > 0 {
@@ -374,6 +377,17 @@ func (e *Editor) FindPositionByRowColumn(row int, column int) float32 {
 	return width
 }
 
+func (e *Editor) FindRowByIndex(index int) int {
+	for i, row := range e.Rows {
+		autoNewLine := row.Start <= index && index < row.Start+row.Length && row.AutoNewLine
+		notAutoNewLine := row.Start <= index && index < row.Start+row.Length && !row.AutoNewLine
+		if autoNewLine || notAutoNewLine {
+			return i
+		}
+	}
+	return -1
+}
+
 // returns: rowIndex, row, inXBounds, column, index, columnXPosition, previousChar, error
 func (e *Editor) FindRowClickMetadata(mouseClick rl.Vector2) (int, *Row, bool, int, int, float32, rune, error) {
 	for i, row := range e.Rows {
@@ -422,14 +436,15 @@ func (e *Editor) FindRowClickMetadata(mouseClick rl.Vector2) (int, *Row, bool, i
 }
 
 func (e *Editor) MoveCursorForward() {
+	currentRow := e.CurrentRow()
 	if e.Cursor.CurrentIndex == int(e.PieceTable.Length)-1 {
+	// if e.Cursor.Row == len(e.Rows)-1 && e.Cursor.Column == currentRow.Length-1 {
 		return
 	}
 	clear(e.LastCursorPositions)
 	currentChar, _ := e.CurrentChar()
-	currentRow := e.CurrentRow()
 	charSize := e.CharRectangle(currentChar)
-	isEndOfRow := e.Cursor.Column == currentRow.Length
+	isEndOfRow := e.Cursor.Column >= currentRow.Length-1
 	isNewLine := currentChar == '\n'
 	isCharacter := !isEndOfRow && !isNewLine
 	if isCharacter {
@@ -464,15 +479,21 @@ func (e *Editor) MoveCursorBackward() {
 	if shouldGoToPreviousRow {
 		e.LastRowVisited = e.Cursor.Row
 		previousRow, _ := e.PreviousRow()
-		newColumn := previousRow.Length
-		newCurrentIndex := e.Cursor.CurrentIndex
-		if !previousRow.AutoNewLine {
-			newColumn--
-			newCurrentIndex--
+		newColumn := previousRow.Length - 1
+		newCurrentIndex := previousRow.Start+previousRow.Length - 1
+		newPosition := e.Rectangle.X + previousRow.Rectangle.Width
+		if previousRow.AutoNewLine {
+			previousChar, _ := e.PieceTable.GetAt(uint(e.Cursor.CurrentIndex - 1))
+			previousCharSize := e.CharRectangle(previousChar)
+			newPosition -= previousCharSize.X
 		}
+		// if !previousRow.AutoNewLine {
+		// 	newColumn--
+		// 	newCurrentIndex--
+		// }
 		e.Cursor.SetPosition(
 			newCurrentIndex,
-			e.Rectangle.X+previousRow.Rectangle.Width,
+			newPosition,
 			previousRow.Rectangle.Y,
 			e.Cursor.Row-1,
 			newColumn,
@@ -603,6 +624,100 @@ func (e *Editor) SetCursorPositionByClick(mouseClick rl.Vector2) error {
 		)
 	}
 	return nil
+}
+
+func (e *Editor) Insert(index int, sequence Sequence) {
+	rowIndex := e.FindRowByIndex(index)
+	// row := e.Rows[rowIndex]
+	// currentRowLengthBefore := row.Length
+	e.PieceTable.Insert(uint(index), sequence)
+	e.CalculateRows()
+	rowAfter := e.Rows[rowIndex]
+	currentRowLengthAfter := rowAfter.Length
+
+	sequenceSize := e.SequenceRectangle(sequence)
+	// willOverflowEditorBounds := e.Cursor.Rectangle.X+sequenceSize.X > e.Rectangle.X+e.Rectangle.Width
+	// isEndOfRowAutoNewLine := e.Cursor.Column == row.Length && row.AutoNewLine
+	// isEndOfRowNotAutoNewLine := e.Cursor.Column == row.Length-1 && !row.AutoNewLine
+	// isEndOfRow := e.Cursor.Column > row.Length-1
+	// inMiddleOfRow := !willOverflowEditorBounds && !isEndOfRowAutoNewLine && !isEndOfRowNotAutoNewLine
+	// inMiddleOfRow := !willOverflowEditorBounds && !isEndOfRow
+	e.Cursor.SetPosition(
+		e.Cursor.CurrentIndex+len(sequence),
+		e.Cursor.Rectangle.X+sequenceSize.X,
+		e.Cursor.Rectangle.Y,
+		e.Cursor.Row,
+		e.Cursor.Column+len(sequence),
+	)
+	if e.Cursor.CurrentIndex > rowAfter.Start+rowAfter.Length {
+		// newColumn := currentRowLengthBefore-currentRowLengthAfter
+		nextRow, _ := e.NextRow()
+		// newColumn := e.Cursor.CurrentIndex-currentRowLengthAfter
+		newColumn := e.Cursor.Column-currentRowLengthAfter
+		newPosition := e.FindPositionByRowColumn(e.Cursor.Row+1, newColumn)
+		newCurrentIndex := nextRow.Start+newColumn
+		e.Cursor.SetPosition(
+			// e.Cursor.CurrentIndex-1,
+			newCurrentIndex,
+			newPosition,
+			nextRow.Rectangle.Y,
+			e.Cursor.Row+1,
+			newColumn,
+		)
+	// if inMiddleOfRow {
+	// 	}
+	// // } else if isEndOfRowAutoNewLine {
+
+	// // } else if isEndOfRowNotAutoNewLine {
+
+	// } else {
+	// 	nextRow, _ := e.NextRow()
+	// 	e.Cursor.SetPosition(
+	// 		nextRow.Start+len(sequence),
+	// 		nextRow.Rectangle.X+sequenceSize.X,
+	// 		nextRow.Rectangle.Y,
+	// 		e.Cursor.Row+1,
+	// 		len(sequence),
+	// 	)
+	}
+	// } else if isEndOfRow {
+	// 	nextRow, _ := e.NextRow()
+	// 	e.Cursor.SetPosition(
+	// 		nextRow.Start+len(sequence),
+	// 		nextRow.Rectangle.X+sequenceSize.X,
+	// 		nextRow.Rectangle.Y,
+	// 		e.Cursor.Row+1,
+	// 		len(sequence),
+	// 	)
+	// } else if willOverflowEditorBounds {
+	// 	nextRow, _ := e.NextRow()
+	// 	e.Cursor.SetPosition(
+	// 		nextRow.Start+len(sequence),
+	// 		nextRow.Rectangle.X+sequenceSize.X,
+	// 		nextRow.Rectangle.Y,
+	// 		e.Cursor.Row+1,
+	// 		len(sequence),
+	// 	)
+	// }
+
+	// middleAutoNewLine := row.Start <= index && index < row.Start+row.Length && row.AutoNewLine
+	// middleNotAutoNewLine := row.Start <= index && index <= row.Start+row.Length && row.AutoNewLine
+	// if middleAutoNewLine || middleNotAutoNewLine {
+	// 	e.PieceTable.Insert(uint(index), sequence)
+	// 	e.CalculateRows()
+	// 	e.MoveCursorForward()
+	// } else {
+	// 	nextRow, _ := e.NextRow()
+	// 	sequenceSize := e.SequenceRectangle(sequence)
+	// 	e.Cursor.SetPosition(
+	// 		nextRow.Start+1,
+	// 		nextRow.Rectangle.X+sequenceSize.X,
+	// 		nextRow.Rectangle.Y,
+	// 		e.Cursor.Row+1,
+	// 		len(sequence),
+	// 	)
+	// }
+
 }
 
 // func (e *Editor) FindRowFromPosition(mouseClickPosition rl.Vector2) (*Row, int) {

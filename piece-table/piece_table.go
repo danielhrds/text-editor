@@ -1,4 +1,4 @@
-package main
+package piecetable
 
 // Implement ToString cache
 // - Invalidate cache if an Insert or Delete occurs
@@ -6,16 +6,10 @@ package main
 import (
 	"fmt"
 	"iter"
-	"log"
-	"os"
+	utils "main/utils"
 	"slices"
 	"strconv"
 )
-
-// ----------- DEBUG -----------
-var logger = log.New(os.Stdout, "\033[33m[DEBUG]\033[0m ", 0)
-
-// -----------------------------
 
 // I didn't want to put Iterators methods in the Collection interface
 // but I couldn't come up with a good solution because I'm dumb
@@ -89,6 +83,10 @@ func (pt *PieceTable) ToString() string {
 	return string(sequence)
 }
 
+func (pt *PieceTable) PiecesAmount() uint {
+	return uint(pt.Pieces.Size())
+}
+
 // sequence, startPosition,
 func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, error) {
 	sequence := Sequence{}
@@ -96,7 +94,7 @@ func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, e
 	if err != nil {
 		return Sequence{}, 0, err
 	}
-	
+
 	trackLength := 0
 	for i, piece := range pieces {
 		start, end := piece.Start, piece.Start+piece.Length
@@ -125,14 +123,14 @@ func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, e
 	}
 
 	if trackLength > int(length) {
-		logger.Println("GetSequence: trackLength > length. Should be trackLength == length")
+		utils.Logger.Println("GetSequence: trackLength > length. Should be trackLength == length")
 	}
 
 	return Sequence{}, 0, fmt.Errorf("GetSequence: error trying to find sequence")
 }
 
 func (pt *PieceTable) GetAt(position uint) (rune, error) {
-	// logger.Println("Position", position)
+	// utils.Logger.Println("Position", position)
 	if position > pt.Length {
 		return 0, fmt.Errorf("GetAt: error trying to get char at position > Length")
 	}

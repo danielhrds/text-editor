@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	pt "main/piece-table"
+	"main/utils"
 	"os"
 	"strconv"
 
@@ -21,18 +23,18 @@ func main() {
 	rl.SetTargetFPS(window.FPS)
 
 	original, _ := ReadFile("example.txt")
-	pt := NewPieceTable(
-		Sequence(original),
+	pt := pt.NewPieceTable(
+		pt.Sequence(original),
 	)
 	// pt.Insert(20, Sequence("went to the park and\n"))
-	logger.Println(pt.ToString())
+	utils.Logger.Println(pt.ToString())
 
 	// original, _ := ReadFile("example2.txt")
 	// original, _ := ReadFile("example3.txt")
 	// editor := NewEditor(rl.NewRectangle(20, 0, float32(window.Width-100), float32(window.Height-100)), rl.Gray)
 	editor := NewEditor(rl.NewRectangle(0, 0, 255, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
 	// editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30, 30, 30, 255))
-	
+
 	latin1 := make([]rune, 0, 255-32+1)
 	var cp rune
 	for cp = 32; cp <= 255; cp++ {
@@ -45,7 +47,7 @@ func main() {
 	editor.Font = &font
 	editor.PieceTable = &pt
 	window.Editor = &editor
-	window.Editor.CalculateRows()
+	window.Editor.CalculateLines()
 
 	for !rl.WindowShouldClose() {
 		rl.ClearBackground(rl.White)
@@ -99,21 +101,21 @@ func (w *Window) Draw() {
 	w.Editor.Draw()
 	mouse := rl.GetMousePosition()
 	mouseStr := fmt.Sprintf("Mouse X: %f Mouse Y: %f", mouse.X, mouse.Y)
-	currentRow := w.Editor.Rows[w.Editor.Cursor.Row]
+	currentLine := w.Editor.Lines[w.Editor.Cursor.Line]
 	rl.DrawText(mouseStr, w.Width/2, w.Height/2, 20, rl.Pink)
 	rl.DrawText("Current position: "+strconv.Itoa(w.Editor.Cursor.CurrentIndex), w.Width/2, w.Height/2+30, 20, rl.Pink)
 	rl.DrawText(
-		"Row: "+strconv.Itoa(w.Editor.Cursor.Row)+
-			" | Start: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Start)+
-			" | Length: "+strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Length)+
-			" | AutoNewLine: "+strconv.FormatBool(currentRow.AutoNewLine),
+		"Line: "+strconv.Itoa(w.Editor.Cursor.Line)+
+			" | Start: "+strconv.Itoa(w.Editor.Lines[w.Editor.Cursor.Line].Start)+
+			" | Length: "+strconv.Itoa(w.Editor.Lines[w.Editor.Cursor.Line].Length)+
+			" | AutoNewLine: "+strconv.FormatBool(currentLine.AutoNewLine),
 		w.Width/2,
 		w.Height/2+60,
 		20,
 		rl.Pink,
 	)
-	rowWidth := currentRow.Rectangle.Width
-	rl.DrawText("Row Width: "+strconv.Itoa(int(rowWidth)), w.Width/2, w.Height/2+90, 20, rl.Pink)
+	lineWidth := currentLine.Rectangle.Width
+	rl.DrawText("Line Width: "+strconv.Itoa(int(lineWidth)), w.Width/2, w.Height/2+90, 20, rl.Pink)
 	rl.DrawText("Column: "+strconv.Itoa(w.Editor.Cursor.Column), w.Width/2, w.Height/2+120, 20, rl.Pink)
 
 	char, _ := w.Editor.PieceTable.GetAt(uint(w.Editor.Cursor.CurrentIndex))
@@ -125,8 +127,8 @@ func (w *Window) Draw() {
 	rl.DrawText("FPS: "+strconv.Itoa(int(rl.GetFPS())), w.Width/2, w.Height/2+270, 20, rl.Pink)
 
 	rl.DrawRectangle(
-		int32(rowWidth),
-		currentRow.Rectangle.ToInt32().Y,
+		int32(lineWidth),
+		currentLine.Rectangle.ToInt32().Y,
 		w.Editor.Cursor.Rectangle.ToInt32().Width,
 		w.Editor.Cursor.Rectangle.ToInt32().Height,
 		rl.NewColor(rl.Pink.R, rl.Pink.G, rl.Pink.B, 128),
@@ -142,7 +144,7 @@ func (w *Window) Input() {
 		}
 		// key := rl.GetKeyPressed()
 
-		// @arrow input
+		// @arline input
 		if rl.IsKeyPressed(rl.KeyRight) {
 			w.Editor.MoveCursorForward()
 		}
@@ -157,14 +159,14 @@ func (w *Window) Input() {
 		}
 
 		if rl.IsKeyPressed(rl.KeyR) {
-			fmt.Println("row", w.Editor.FindRowByIndex(w.Editor.Cursor.CurrentIndex))
+			fmt.Println("line", w.Editor.FindLineByIndex(w.Editor.Cursor.CurrentIndex))
 		}
 
 		if char != 0 {
 			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{char})
 			// w.Editor.PieceTable.Insert(uint(w.Editor.Cursor.CurrentIndex), []rune{char})
 			// w.Editor.MoveCursorForward()
-			// w.Editor.CalculateRows()
+			// w.Editor.CalculateLines()
 		}
 	}
 
@@ -178,16 +180,16 @@ func (w *Window) Input() {
 	if rl.IsMouseButtonPressed(rl.MouseRightButton) {
 		// ------------ Debugging ------------
 
-		logger.Println("")
-		logger.Println("Current position: " + strconv.Itoa(w.Editor.Cursor.CurrentIndex))
-		logger.Println("Row: " + strconv.Itoa(w.Editor.Cursor.Row) + " Start: " + strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Start) + " Length: " + strconv.Itoa(w.Editor.Rows[w.Editor.Cursor.Row].Length))
-		logger.Println("Row Width: " + strconv.Itoa(int(w.Editor.Rows[w.Editor.Cursor.Row].Rectangle.Width)))
-		logger.Println("Column: " + strconv.Itoa(w.Editor.Cursor.Column))
+		utils.Logger.Println("")
+		utils.Logger.Println("Current position: " + strconv.Itoa(w.Editor.Cursor.CurrentIndex))
+		utils.Logger.Println("Line: " + strconv.Itoa(w.Editor.Cursor.Line) + " Start: " + strconv.Itoa(w.Editor.Lines[w.Editor.Cursor.Line].Start) + " Length: " + strconv.Itoa(w.Editor.Lines[w.Editor.Cursor.Line].Length))
+		utils.Logger.Println("Line Width: " + strconv.Itoa(int(w.Editor.Lines[w.Editor.Cursor.Line].Rectangle.Width)))
+		utils.Logger.Println("Column: " + strconv.Itoa(w.Editor.Cursor.Column))
 		char, _ := w.Editor.PieceTable.GetAt(uint(w.Editor.Cursor.CurrentIndex))
-		logger.Println("Current character: " + string(char))
-		logger.Println("Previous character: " + string(w.Editor.PreviousCharacter))
-		logger.Println("Cursor X: " + strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.X), 'f', 2, 32))
-		logger.Println("Cursor Y: " + strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.Y), 'f', 2, 32))
+		utils.Logger.Println("Current character: " + string(char))
+		utils.Logger.Println("Previous character: " + string(w.Editor.PreviousCharacter))
+		utils.Logger.Println("Cursor X: " + strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.X), 'f', 2, 32))
+		utils.Logger.Println("Cursor Y: " + strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.Y), 'f', 2, 32))
 
 		// -----------------------------------
 		_, err := os.Stat("output 1.txt")
@@ -209,6 +211,6 @@ func (w *Window) Input() {
 				n++
 			}
 		}
-		
+
 	}
 }

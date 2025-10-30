@@ -55,6 +55,7 @@ func main() {
 	rl.SetTextureFilter(font.Texture, rl.FilterBilinear)
 	defer rl.UnloadFont(font)
 	editor.ChangeFont(&font)
+	// editor.CharSpacing = 3
 	editor.PieceTable = &pt
 	window.Editor = &editor
 	window.Editor.CalculateLines()

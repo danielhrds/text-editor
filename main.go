@@ -13,6 +13,8 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+var keys []int32 = make([]int32, 0)
+
 // @main
 func main() {
 	defer rl.CloseWindow()
@@ -23,6 +25,7 @@ func main() {
 	rl.SetTargetFPS(window.FPS)
 
 	original, _ := ReadFile("example.txt")
+	// original, _ := ReadFile("output/output 8.txt")
 	pt := pt.NewPieceTable(
 		pt.Sequence(original),
 	)
@@ -32,8 +35,15 @@ func main() {
 	// original, _ := ReadFile("example2.txt")
 	// original, _ := ReadFile("example3.txt")
 	// editor := NewEditor(rl.NewRectangle(20, 0, float32(window.Width-100), float32(window.Height-100)), rl.Gray)
-	editor := NewEditor(rl.NewRectangle(0, 0, 255, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
-	// editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30, 30, 30, 255))
+	// editor := NewEditor(rl.NewRectangle(0, 0, 255, float32(window.Height-100)), rl.NewColor(30, 30, 30, 255))
+	editor := NewEditor(rl.NewRectangle(0, 0, float32(window.Width), float32(window.Height)), rl.NewColor(30, 30, 30, 255))
+	defer func() {
+		if r := recover(); r != nil {
+			OutputText(*editor.PieceTable)
+			OutputKeys()
+			os.Exit(1)
+		}
+	}()
 
 	latin1 := make([]rune, 0, 255-32+1)
 	var cp rune
@@ -44,7 +54,7 @@ func main() {
 	rl.GenTextureMipmaps(&font.Texture)
 	rl.SetTextureFilter(font.Texture, rl.FilterBilinear)
 	defer rl.UnloadFont(font)
-	editor.Font = &font
+	editor.ChangeFont(&font)
 	editor.PieceTable = &pt
 	window.Editor = &editor
 	window.Editor.CalculateLines()
@@ -126,8 +136,11 @@ func (w *Window) Draw() {
 	rl.DrawText("Cursor Y: "+strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.Y), 'f', 2, 32), w.Width/2, w.Height/2+240, 20, rl.Pink)
 	rl.DrawText("FPS: "+strconv.Itoa(int(rl.GetFPS())), w.Width/2, w.Height/2+270, 20, rl.Pink)
 
+	rl.DrawText("Editor.EditorRec.X: "+strconv.Itoa(int(w.Editor.EditorRec.X)), w.Width/2, w.Height/2+300, 20, rl.Pink)
+	rl.DrawText("Editor.WritableRec.X: "+strconv.Itoa(int(w.Editor.WritableRec.X)), w.Width/2, w.Height/2+330, 20, rl.Pink)
+
 	rl.DrawRectangle(
-		int32(lineWidth),
+		int32(w.Editor.WritableRec.X+lineWidth),
 		currentLine.Rectangle.ToInt32().Y,
 		w.Editor.Cursor.Rectangle.ToInt32().Width,
 		w.Editor.Cursor.Rectangle.ToInt32().Height,
@@ -142,9 +155,8 @@ func (w *Window) Input() {
 		if char != 0 {
 			fmt.Println(char, "string:", string(char), w.Editor.CharRectangle(char))
 		}
-		// key := rl.GetKeyPressed()
 
-		// @arline input
+		// @arrows input
 		if rl.IsKeyPressed(rl.KeyRight) {
 			w.Editor.MoveCursorForward()
 		}
@@ -158,12 +170,19 @@ func (w *Window) Input() {
 			w.Editor.MoveCursorDownward()
 		}
 
-		if rl.IsKeyPressed(rl.KeyR) {
-			fmt.Println("line", w.Editor.FindLineByIndex(w.Editor.Cursor.CurrentIndex))
+		if rl.IsKeyPressed(rl.KeyApostrophe) {
+			OutputText(*w.Editor.PieceTable)
+			OutputKeys()
+			os.Exit(1)
+		}
+
+		if rl.IsKeyPressed(rl.KeyBackspace) {
+			w.Editor.Delete(w.Editor.Cursor.CurrentIndex, 1)
 		}
 
 		if char != 0 {
-			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, []rune{char})
+			keys = append(keys, char)
+			w.Editor.Insert(w.Editor.Cursor.CurrentIndex, pt.Sequence([]byte(string(char))))
 			// w.Editor.PieceTable.Insert(uint(w.Editor.Cursor.CurrentIndex), []rune{char})
 			// w.Editor.MoveCursorForward()
 			// w.Editor.CalculateLines()
@@ -191,26 +210,36 @@ func (w *Window) Input() {
 		utils.Logger.Println("Cursor X: " + strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.X), 'f', 2, 32))
 		utils.Logger.Println("Cursor Y: " + strconv.FormatFloat(float64(w.Editor.Cursor.Rectangle.Y), 'f', 2, 32))
 
-		// -----------------------------------
-		_, err := os.Stat("output 1.txt")
-		if errors.Is(err, os.ErrNotExist) {
-			file, _ := os.Create("output 1.txt")
-			defer file.Close()
-			file.WriteString(w.Editor.PieceTable.ToString())
-		} else {
-			n := 2
-			for {
-				fileName := fmt.Sprintf("output %d.txt", n)
-				_, err := os.Stat(fileName)
-				if errors.Is(err, os.ErrNotExist) {
-					file, _ := os.Create(fileName)
-					defer file.Close()
-					file.WriteString(w.Editor.PieceTable.ToString())
-					break
-				}
-				n++
-			}
-		}
+	}
+}
 
+func OutputText(pt pt.PieceTable) {
+	n := 1
+	for {
+		fileName := fmt.Sprintf("output/output %d.txt", n)
+		_, err := os.Stat(fileName)
+		if errors.Is(err, os.ErrNotExist) {
+			file, _ := os.Create(fileName)
+			defer file.Close()
+			file.WriteString(pt.ToString())
+			return
+		}
+		n++
+	}
+}
+
+func OutputKeys() {
+	n := 1
+	for {
+		fileName := fmt.Sprintf("output/output %d keys.txt", n)
+		_, err := os.Stat(fileName)
+		if errors.Is(err, os.ErrNotExist) {
+			file, _ := os.Create(fileName)
+			defer file.Close()
+			str := string(keys)
+			file.WriteString(str)
+			return
+		}
+		n++
 	}
 }

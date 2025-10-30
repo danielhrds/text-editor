@@ -72,10 +72,10 @@ func (ll *LinkedList[T]) InsertAt(value T, index int) error {
 			return err
 		}
 		oldPrevious := nodeAtIndex.Previous
-		oldPrevious.Next = newNode 					// oldPrevious -> newNode
-		newNode.Next = nodeAtIndex					// oldPrevious -> newNode -> nodeAtIndex
-		newNode.Previous = oldPrevious			// oldPrevious <- newNode
-		nodeAtIndex.Previous = newNode			// oldPrevious <- newNode <- nodeAtIndex
+		oldPrevious.Next = newNode     // oldPrevious -> newNode
+		newNode.Next = nodeAtIndex     // oldPrevious -> newNode -> nodeAtIndex
+		newNode.Previous = oldPrevious // oldPrevious <- newNode
+		nodeAtIndex.Previous = newNode // oldPrevious <- newNode <- nodeAtIndex
 	}
 	if index == int(ll.Length) {
 		ll.Append(value)
@@ -143,7 +143,7 @@ func (ll *LinkedList[T]) Forward() iter.Seq2[int, T] {
 }
 
 func (ll *LinkedList[T]) Backward() iter.Seq2[int, T] {
-	var i int = ll.Length-1
+	var i int = ll.Length - 1
 	return func(yield func(int, T) bool) {
 		for node := ll.Last; node != nil; node = node.Previous {
 			if !yield(i, node.Value) {

@@ -9,6 +9,7 @@ import (
 	utils "main/utils"
 	"slices"
 	"strconv"
+	"unicode/utf8"
 )
 
 // I didn't want to put Iterators methods in the Collection interface
@@ -29,8 +30,10 @@ type Collection[T any] interface {
 // ---------------------------------------------------
 
 type Piece struct {
-	Start      uint
-	Length     uint
+	ByteStart  uint
+	RuneStart  uint
+	ByteLength uint
+	RuneLength uint
 	isOriginal bool
 }
 
@@ -39,40 +42,135 @@ func (p *Piece) Hash() uint {
 	if p.isOriginal {
 		isOriginal = 1
 	}
-	return Pow(p.Length, p.Start) + uint(isOriginal)
+	return Pow(p.ByteLength, p.ByteStart) + uint(isOriginal)
 }
 
-// Since piece table is a data structure like any other,
-// I could implement the methods to support the Collection interface,
-// But I only realized this now and I'm very lazy ngl
-type Sequence = []rune
+type FoundPieces struct {
+	Pieces            []*Piece
+	FirstPieceIndex   int
+	BytePosition      uint
+	ByteLength        uint
+	RuneStartPosition uint
+	ByteStartPosition uint
+	RuneEndPosition   uint
+	ByteEndPosition   uint
+}
+
+type Sequence []byte
+
+func (s Sequence) ByteLength() int {
+	return len(s)
+}
+
+func (s Sequence) RuneLength() int {
+	return utf8.RuneCount(s)
+}
+
+func (s Sequence) ByteForward() iter.Seq2[int, byte] {
+	return func(yield func(int, byte) bool) {
+		for j, _byte := range s {
+			if !yield(j, _byte) {
+				return
+			}
+		}
+	}
+}
+
+func (s Sequence) RuneForward() iter.Seq2[int, rune] {
+	var i int
+	return func(yield func(int, rune) bool) {
+		j := 0
+		for j < len(s) {
+			decodedRune, size := utf8.DecodeRune(s[j:])
+			if !yield(i, decodedRune) {
+				return
+			}
+			i++
+			j += size
+		}
+	}
+}
+
 type PieceTable struct {
-	OriginalBuffer Sequence
-	AddBuffer      Sequence
-	Pieces         Collection[*Piece]
-	Length         uint
+	OriginalBuffer      Sequence
+	AddBuffer           Sequence
+	AddBufferRuneLength uint
+	Pieces              Collection[*Piece]
+	ByteLength          uint
+	RuneLength          uint
 }
 
-func NewPieceTable(content []rune) PieceTable {
+func NewPieceTable(content Sequence) PieceTable {
+	runeLength := utf8.RuneCount(content)
 	ll := NewLinkedList(&Piece{
-		Start:      0,
-		Length:     uint(len(content)),
+		ByteStart:  0,
+		RuneStart:  0,
+		ByteLength: uint(len(content)),
+		RuneLength: uint(runeLength),
 		isOriginal: true,
 	},
 	)
 
 	return PieceTable{
 		OriginalBuffer: content,
-		AddBuffer:      []rune{},
+		AddBuffer:      Sequence{},
 		Pieces:         &ll,
-		Length:         uint(len(content)),
+		ByteLength:     uint(len(content)),
+		RuneLength:     uint(runeLength),
 	}
 }
 
+func (pt *PieceTable) PieceSequence(piece *Piece, start uint, end uint) Sequence {
+	if piece.isOriginal {
+		return Sequence(pt.OriginalBuffer[start:end])
+	} else {
+		return Sequence(pt.AddBuffer[start:end])
+	}
+}
+
+func (pt *PieceTable) Runes() iter.Seq2[int, rune] {
+	var i int
+	return func(yield func(int, rune) bool) {
+		var sequence Sequence
+		for _, piece := range pt.Pieces.Forward() {
+			sequence = pt.PieceSequence(piece, piece.ByteStart, piece.ByteStart+piece.ByteLength)
+			for _, _rune := range sequence.RuneForward() {
+				if !yield(i, _rune) {
+					return
+				}
+				i++
+			}
+		}
+	}
+}
+
+func (pt *PieceTable) GetBytePosition(pieces []*Piece, position uint, runeStartPosition uint, byteStartPosition uint) (uint, uint) {
+	// TODO: Later change it to search only in one piece. runeStartPosition might be too far behind where the position is.
+	j := runeStartPosition
+	bytePosition := byteStartPosition
+	var byteIndex uint
+	for _, piece := range pieces {
+		buffer := pt.PieceSequence(piece, piece.ByteStart, piece.ByteStart+piece.ByteLength)
+		index := 0
+		for index < len(buffer) {
+			if j == position {
+				return bytePosition, byteIndex
+			}
+			_, size := utf8.DecodeRune(buffer[index:])
+			byteIndex = uint(index)
+			index += size
+			bytePosition += uint(size)
+			j++
+		}
+	}
+	return bytePosition, byteIndex
+}
+
+// treat as byte
 func (pt *PieceTable) ToString() string {
 	sequence := Sequence{}
 	for _, piece := range pt.Pieces.Forward() {
-		start, length := piece.Start, piece.Start+piece.Length
+		start, length := piece.ByteStart, piece.ByteStart+piece.ByteLength
 		if piece.isOriginal {
 			sequence = append(sequence, pt.OriginalBuffer[start:length]...)
 		}
@@ -87,42 +185,40 @@ func (pt *PieceTable) PiecesAmount() uint {
 	return uint(pt.Pieces.Size())
 }
 
-// sequence, startPosition,
+// position and length are from rune contexts
+//
+// sequence, startPosition, error
 func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, error) {
 	sequence := Sequence{}
-	pieces, _, startPosition, err := pt.FindPieces(position, length)
+	foundPiecesMetadata, err := pt.FindPieces(position, length)
 	if err != nil {
 		return Sequence{}, 0, err
 	}
 
 	trackLength := 0
-	for i, piece := range pieces {
-		start, end := piece.Start, piece.Start+piece.Length
+	for i, piece := range foundPiecesMetadata.Pieces {
+		start, end := piece.ByteStart, piece.ByteStart+piece.ByteLength
 		if i == 0 {
-			start += position - startPosition
+			start += foundPiecesMetadata.BytePosition - foundPiecesMetadata.ByteStartPosition
 		}
-		if len(pieces) > 1 && i == len(pieces)-1 {
-			end = piece.Start + (length - uint(trackLength))
+		if len(foundPiecesMetadata.Pieces) > 1 && i == len(foundPiecesMetadata.Pieces)-1 {
+			end = piece.ByteStart + (foundPiecesMetadata.ByteLength - uint(trackLength))
 		}
 
-		isGreaterThanLength := end-start > length
+		isGreaterThanLength := end-start > foundPiecesMetadata.ByteLength
 		if isGreaterThanLength {
-			end = start + (length - uint(trackLength))
+			end = start + (foundPiecesMetadata.ByteLength - uint(trackLength))
 		}
-		if piece.isOriginal {
-			sequence = append(sequence, pt.OriginalBuffer[start:end]...)
-		}
-		if !piece.isOriginal {
-			sequence = append(sequence, pt.AddBuffer[start:end]...)
-		}
+		pieceSequence := pt.PieceSequence(piece, start, end)
+		sequence = append(sequence, pieceSequence...)
 		trackLength += int(end - start)
-		if trackLength == int(length) {
-			return sequence, startPosition, nil
+		if trackLength == int(foundPiecesMetadata.ByteLength) {
+			return sequence, foundPiecesMetadata.RuneStartPosition, nil
 		}
-		startPosition += piece.Length
+		foundPiecesMetadata.RuneStartPosition += piece.RuneLength
 	}
 
-	if trackLength > int(length) {
+	if trackLength > int(foundPiecesMetadata.ByteLength) {
 		utils.Logger.Println("GetSequence: trackLength > length. Should be trackLength == length")
 	}
 
@@ -130,69 +226,95 @@ func (pt *PieceTable) GetSequence(position uint, length uint) (Sequence, uint, e
 }
 
 func (pt *PieceTable) GetAt(position uint) (rune, error) {
-	// utils.Logger.Println("Position", position)
-	if position > pt.Length {
-		return 0, fmt.Errorf("GetAt: error trying to get char at position > Length")
+	if position > pt.RuneLength {
+		return 0, fmt.Errorf("GetAt: error trying to get char at position > RuneLength")
 	}
 
-	sequence, startPosition, err := pt.GetSequence(position, 1)
+	sequence, _, err := pt.GetSequence(position, 1)
 	if err != nil {
 		return 0, err
 	}
 	if len(sequence) < 1 {
 		return 0, fmt.Errorf("GetAt: error trying to get char. len(Sequence) < 1")
 	}
-	var char rune
-	for _, char = range sequence {
-		if position == startPosition {
-			break
-		}
-		startPosition++
-	}
+	char, _ := utf8.DecodeRune(sequence)
 	return char, nil
+	// for _, char := range sequence.RuneForward() {
+	// 	if position == runeStartPosition {
+	// 		return char, nil
+	// 	}
+	// 	runeStartPosition++
+	// }
+	// return 0, nil
 }
 
-// maybe return error if position is greater than the length.
-// Returns Piece, startPosition, endPosition, index, and error
-func (pt *PieceTable) FindPiece(position uint) (*Piece, uint, uint, uint, error) {
-	// IMPORTANT TO READ:
-	// The whole thing with 'startPosition' and 'endPosition' is needed because it is good to know where we are on the text index.
-	// Since we will have the piece's length, return just startPosition is enough though.
-
-	if position > pt.Length {
-		return nil, 0, 0, 0, fmt.Errorf("FindPiece: error trying to find piece at position > Length")
+// position on the whole text, coming from editor, so it's in rune index.
+//
+// Returns foundPiece, bytePosition, runeStartPosition, runeEndPosition, byteStartPosition, byteEndPosition, index, error
+func (pt *PieceTable) FindPiece(position uint) (FoundPieces, error) {
+	if position > pt.RuneLength {
+		return FoundPieces{}, fmt.Errorf("FindPiece: error trying to find piece at position > Length")
 	}
 
-	startFromBeginning := position < pt.Length/2
+	fp := FoundPieces{}
+	startFromBeginning := position < pt.RuneLength/2
 	if startFromBeginning {
-		var startPosition uint
-		var endPosition uint
 		for i, piece := range pt.Pieces.Forward() {
-			endPosition += piece.Length
-			if endPosition >= position {
-				return piece, startPosition, endPosition, uint(i), nil
+			fp.RuneEndPosition += piece.RuneLength
+			fp.ByteEndPosition += piece.ByteLength
+			if fp.RuneEndPosition >= position {
+				var byteIndex uint
+				fp.BytePosition, byteIndex = pt.GetBytePosition(
+					[]*Piece{piece},
+					position,
+					fp.RuneStartPosition,
+					fp.ByteStartPosition,
+				)
+				sequence := pt.PieceSequence(piece, piece.ByteStart, piece.ByteStart+piece.ByteLength)
+				_, size := utf8.DecodeRune(sequence[byteIndex:])
+				fp.ByteLength = uint(size)
+				fp.Pieces = []*Piece{piece}
+				fp.FirstPieceIndex = i
+				return fp, nil
 			}
-			startPosition = endPosition
+			fp.RuneStartPosition = fp.RuneEndPosition
+			fp.ByteStartPosition = fp.ByteEndPosition
 		}
-	}
-	if !startFromBeginning {
-		var startPosition uint = pt.Length
-		var endPosition uint
+	} else {
+		fp.RuneStartPosition = pt.RuneLength
+		fp.ByteStartPosition = pt.ByteLength
 		for i, piece := range pt.Pieces.Backward() {
-			startPosition -= piece.Length
-			endPosition = startPosition + piece.Length
-			if startPosition < position {
-				// i dont know if im right but the endPosition should be endPosition-1 i think
-				return piece, startPosition, endPosition, uint(i), nil
+			fp.RuneStartPosition -= piece.RuneLength
+			fp.RuneEndPosition = fp.RuneStartPosition + piece.RuneLength
+			fp.ByteStartPosition -= piece.ByteLength
+			fp.ByteEndPosition = fp.ByteStartPosition + piece.ByteLength
+			if fp.RuneStartPosition < position {
+				var byteIndex uint
+				fp.BytePosition, byteIndex = pt.GetBytePosition(
+					[]*Piece{piece},
+					position,
+					fp.RuneStartPosition,
+					fp.ByteStartPosition,
+				)
+				sequence := pt.PieceSequence(piece, piece.ByteStart, piece.ByteStart+piece.ByteLength)
+				_, size := utf8.DecodeRune(sequence[byteIndex:])
+				fp.ByteLength = uint(size)
+				fp.Pieces = []*Piece{piece}
+				fp.FirstPieceIndex = i
+				// i dont know if im right but the fp.RuneEndPosition should be fp.RuneEndPosition-1 i think
+				return fp, nil
 			}
 		}
 	}
-	return nil, 0, 0, 0, nil
+	return FoundPieces{}, nil
 }
 
-func (pt *PieceTable) FindPieces(position uint, length uint) ([]*Piece, int, uint, error) {
-	if position > pt.Length {
-		return nil, 0, 0, fmt.Errorf("FindPieces: error trying to find pieces at position > Length")
+// position on the whole text, coming from editor, so it's in rune index.
+//
+// returns foundPieces, pieceFoundIndex, bytePosition, runeStartPosition, byteStartPosition, error
+func (pt *PieceTable) FindPieces(position uint, length uint) (FoundPieces, error) {
+	if position > pt.RuneLength {
+		return FoundPieces{}, fmt.Errorf("FindPieces: error trying to find pieces at position > RuneLength")
 	}
 
 	// I will try to give an example to remind me later because I know I will forget
@@ -219,73 +341,107 @@ func (pt *PieceTable) FindPieces(position uint, length uint) ([]*Piece, int, uin
 	//                ^ That's p3 start, you can see that it will not be affected by the delete.
 	// Also, that means p3End > position and p3End
 
-	var pieces []*Piece
-	var firstPieceFoundIndex int
-	var startPosition uint
-	var startFromBeginning bool = position < pt.Length/2
+	fp := FoundPieces{}
+	var startFromBeginning bool = position < pt.RuneLength/2
 	if startFromBeginning {
-		var endPosition uint
-		var endPositionBeforeSwitchPiece uint
+		var runeEndPositionBeforeSwitchPiece uint
+		var byteEndPositionBeforeSwitchPiece uint
 		for i, piece := range pt.Pieces.Forward() {
-			if endPosition > position && endPosition >= position+length {
-				break
-			}
-
-			endPosition += piece.Length
-			if endPosition > position {
-				if len(pieces) == 0 {
-					startPosition = endPositionBeforeSwitchPiece
-					firstPieceFoundIndex = i
+			fp.RuneEndPosition += piece.RuneLength
+			fp.ByteEndPosition += piece.ByteLength
+			if fp.RuneEndPosition > position {
+				if len(fp.Pieces) == 0 {
+					fp.RuneStartPosition = runeEndPositionBeforeSwitchPiece
+					fp.ByteStartPosition = byteEndPositionBeforeSwitchPiece
+					fp.FirstPieceIndex = i
 				}
-				pieces = append(pieces, piece)
+				fp.Pieces = append(fp.Pieces, piece)
 			}
-			endPositionBeforeSwitchPiece = endPosition
-		}
-	}
-	if !startFromBeginning {
-		var endPosition uint = pt.Length
-		for i, piece := range pt.Pieces.Backward() {
-			endPosition -= piece.Length
-			if endPosition < position+length {
-				pieces = append(pieces, piece)
-			}
-			if endPosition < position && endPosition < position+length {
-				startPosition = endPosition
-				firstPieceFoundIndex = i
+			runeEndPositionBeforeSwitchPiece = fp.RuneEndPosition
+			byteEndPositionBeforeSwitchPiece = fp.ByteEndPosition
+			if fp.RuneEndPosition > position && fp.RuneEndPosition >= position+length {
+				fp.BytePosition, _ = pt.GetBytePosition(
+					fp.Pieces,
+					position,
+					fp.RuneStartPosition,
+					fp.ByteStartPosition,
+				)
+				byteEnd, _ := pt.GetBytePosition(
+					fp.Pieces,
+					position+length,
+					fp.RuneStartPosition,
+					fp.ByteStartPosition,
+				)
+				fp.ByteLength = byteEnd - fp.BytePosition
 				break
 			}
 		}
-		if len(pieces) > 1 {
-			slices.Reverse(pieces)
+	} else {
+		fp.RuneEndPosition = pt.RuneLength
+		fp.ByteEndPosition = pt.ByteLength
+		runeEndPosition := pt.RuneLength
+		byteEndPosition := pt.ByteLength
+		for i, piece := range pt.Pieces.Backward() {
+			runeEndPosition -= piece.RuneLength
+			byteEndPosition -= piece.ByteLength
+			if runeEndPosition < position+length {
+				fp.Pieces = append(fp.Pieces, piece)
+			}
+			if runeEndPosition <= position && runeEndPosition < position+length {
+				fp.RuneStartPosition = runeEndPosition
+				fp.ByteStartPosition = byteEndPosition
+				fp.FirstPieceIndex = i
+				if len(fp.Pieces) > 1 {
+					slices.Reverse(fp.Pieces)
+				}
+				fp.BytePosition, _ = pt.GetBytePosition(
+					fp.Pieces,
+					position,
+					fp.RuneStartPosition,
+					fp.ByteStartPosition,
+				)
+				byteEnd, _ := pt.GetBytePosition(
+					fp.Pieces,
+					position+length,
+					fp.RuneStartPosition,
+					fp.ByteStartPosition,
+				)
+				fp.ByteLength = byteEnd - fp.BytePosition
+				break
+			}
+			fp.RuneEndPosition -= piece.RuneLength
+			fp.ByteEndPosition -= piece.ByteLength
 		}
 	}
 
-	return pieces, firstPieceFoundIndex, startPosition, nil
+	return fp, nil
 }
 
-// position Means the index on the whole text. start Means the start in add buffer
-func (pt *PieceTable) Insert(position uint, text Sequence) error {
-	length := uint(len(text))
-	start := uint(len(pt.AddBuffer))
-	if length == 0 {
-		return fmt.Errorf("Insert: error trying to insert string of length 0")
+// position on the whole text, coming from editor, so it's in rune index.
+func (pt *PieceTable) Insert(position uint, text Sequence) (uint, error) {
+	byteLength := uint(len(text))
+	byteStart := uint(len(pt.AddBuffer))
+	runeLength := uint(utf8.RuneCount(text))
+	runeStart := pt.AddBufferRuneLength
+	if byteLength == 0 {
+		return 0, fmt.Errorf("Insert: error trying to insert string of length 0")
 	}
-	// if position < 0 {
-	// 	return fmt.Errorf("Insert: error trying to insert string at position < 0")
-	// }
-	if position > pt.Length {
-		return fmt.Errorf("Insert: error trying to insert string at position > Length")
+	if position > pt.RuneLength {
+		return 0, fmt.Errorf("Insert: error trying to insert string at position > RuneLength")
 	}
 
-	foundPiece, foundPieceStartPosition, foundPieceEndPosition, index, err := pt.FindPiece(position)
+	foundPiecesMetadata, err := pt.FindPiece(position)
+	foundPiece := foundPiecesMetadata.Pieces[0]
 	if err != nil {
-		return err
+		return 0, err
 	}
 	pt.AddBuffer = append(pt.AddBuffer, text...)
 
 	piece := &Piece{
-		Start:      start,
-		Length:     length,
+		ByteStart:  byteStart,
+		ByteLength: byteLength,
+		RuneStart:  runeStart,
+		RuneLength: runeLength,
 		isOriginal: false,
 	}
 
@@ -293,23 +449,26 @@ func (pt *PieceTable) Insert(position uint, text Sequence) error {
 	case 0:
 		// insert at the beginning of pt.Pieces
 		pt.Pieces.InsertAt(piece, 0)
-	case pt.Length:
+	case pt.RuneLength:
 		// insert at the end of pt.Pieces
 		pt.Pieces.Append(piece)
-	case foundPieceStartPosition:
+	case foundPiecesMetadata.RuneStartPosition:
 		// insert before foundPiece
-		pt.Pieces.InsertAt(piece, int(index))
-	case foundPieceEndPosition:
+		pt.Pieces.InsertAt(piece, int(foundPiecesMetadata.FirstPieceIndex))
+	case foundPiecesMetadata.RuneEndPosition:
 		// insert after foundPiece or increases piece's Length
 		// Why? otherwise it would add a new piece every time.
 		// Since the new sequence is added to the AddBuffer,
 		// I'm assuming it's safe to just increase the piece's length
 		// when it's not original
 		// UPDATE: I WAS WRONG. I'M LEAVING THE COMMENT THERE AS A REMINDER
-		if int(index) == pt.Pieces.Size()-2 && !foundPiece.isOriginal {
-			foundPiece.Length += length
+		isLastPiece := int(foundPiecesMetadata.FirstPieceIndex) == pt.Pieces.Size()-2
+		isContinuous := foundPiece.RuneStart+foundPiece.RuneLength == piece.RuneStart
+		if isLastPiece && !foundPiece.isOriginal && isContinuous {
+			foundPiece.ByteLength += byteLength
+			foundPiece.RuneLength += runeLength
 		} else {
-			pt.Pieces.InsertAt(piece, int(index)+1)
+			pt.Pieces.InsertAt(piece, int(foundPiecesMetadata.FirstPieceIndex)+1)
 		}
 	default:
 		// I will try to give an example to remind me later because I know I will forget
@@ -332,134 +491,85 @@ func (pt *PieceTable) Insert(position uint, text Sequence) error {
 		// To conclude: oldStart + newFirstHalfLength = second half start
 		// ----------------------------------------------------------------------------------
 
-		foundPieceLengthBeforeChange := foundPiece.Length
-		foundPiece.Length = position - foundPieceStartPosition
-		pieceSplitTwoLength := &Piece{
-			Start:      foundPiece.Start + foundPiece.Length,
-			Length:     foundPieceLengthBeforeChange - foundPiece.Length,
+		foundPieceByteLengthBeforeChange := foundPiece.ByteLength
+		foundPieceRuneLengthBeforeChange := foundPiece.RuneLength
+		foundPiece.ByteLength = foundPiecesMetadata.BytePosition - foundPiecesMetadata.ByteStartPosition
+		foundPiece.RuneLength = position - foundPiecesMetadata.RuneStartPosition
+		thirdPiece := &Piece{
+			ByteStart:  foundPiece.ByteStart + foundPiece.ByteLength,
+			ByteLength: foundPieceByteLengthBeforeChange - foundPiece.ByteLength,
+			RuneLength: foundPieceRuneLengthBeforeChange - foundPiece.RuneLength,
+			RuneStart:  foundPiece.RuneStart + foundPiece.RuneLength,
 			isOriginal: foundPiece.isOriginal,
 		}
-		// pt.Pieces = slices.Insert(pt.Pieces, int(index+1), piece)
-		pt.Pieces.InsertAt(piece, int(index+1))
-		pt.Pieces.InsertAt(pieceSplitTwoLength, int(index+2))
-		// pt.Pieces = slices.Insert(pt.Pieces, int(index+2), pieceSplitTwoLength)
+		pt.Pieces.InsertAt(piece, int(foundPiecesMetadata.FirstPieceIndex+1))
+		pt.Pieces.InsertAt(thirdPiece, int(foundPiecesMetadata.FirstPieceIndex+2))
 	}
 
-	pt.Length += length
-	return nil
+	pt.ByteLength += byteLength
+	pt.RuneLength += runeLength
+	pt.AddBufferRuneLength += runeLength
+	return runeLength, nil
 }
 
-func (pt *PieceTable) DeleteIfEmpty(piece *Piece, index int) {
-	if piece.Length <= 0 {
+func (pt *PieceTable) DeleteIfEmpty(piece *Piece, index int) bool {
+	if piece.ByteLength <= 0 {
 		pt.Pieces.DeleteAt(index)
+		return true
 	}
+	return false
 }
 
 func (pt *PieceTable) Delete(position uint, length uint) error {
-	// OBS: Since deletion shifts items from an array to the left, Delete would benefit from a linked list.
-
 	if length == 0 {
 		return fmt.Errorf("Delete: error trying to delete string of length 0")
 	}
-	// if position < 0 {
-	// 	return fmt.Errorf("Delete: error trying to delete string at position < 0")
-	// }
-	if position > pt.Length {
-		return fmt.Errorf("Delete: error trying to delete string at position > Length")
+	if position > pt.RuneLength {
+		return fmt.Errorf("Delete: error trying to delete string at position > RuneLength")
 	}
-	if position+length > pt.Length {
+	if position+length > pt.RuneLength {
 		posLengthErr := strconv.Itoa(int(position + length))
-		lengthErr := strconv.Itoa(int(pt.Length))
-		errStr := fmt.Sprintf("Delete: error trying to delete string at position+length >= Length Position+Length: %s, Length %s", posLengthErr, lengthErr)
+		lengthErr := strconv.Itoa(int(pt.RuneLength))
+		errStr := fmt.Sprintf("Delete: error trying to delete string at position+length >= RuneLength Position+RuneLength: %s, RuneLength %s", posLengthErr, lengthErr)
 		return fmt.Errorf("%s", errStr)
 	}
 
-	// fast path beginning
-	// fath path end
-	// middle:
-	// 	- search source
-	//  - to know from where to start searching (forward or backwards): greaterThanMiddle = position > (len(OriginalBuffer) + len(AddBuffer))/2
-	//  - search:
-	//  - - iterate through Pieces and find which ones has
-	// I will try to give an example to remind me later because I know I will forget
-	// If text is "_______________" Length 15
-	// Three pieces composes that text:
-	// _______________
-	// ^    ^    ^
-	// p1   p2   p3
-	// And we are trying to delete:
-	// _______________
-	//  ^           ^
-	//	| that span |
-	// That means all three pieces are involved, so:
-	// 		p1 would have it's length decreased
-	// 		p2 would be deleted completely
-	//		p3 would have it's start shifted to the right
-
-	//
-	// ad = add buffer
-	// og = original
-	// @ = will remain
-
-	// |    @   |            |  @ |-
-	//          |   deleted  |
-	//  ttttttttttttt tttttttttttt tttttttttt ttttt
-	// | og          | ad         | og       | ad
-
-	// | @      |                        | @
-	//          |   deleted              |
-	//  tttttttt tttttttttttttttttttttttt tttttt
-	// | og     | ad         | og | ad
-	// in that case, pieces inside deletion will be removed
-	// - first ad will be removed
-	// - second og will be removed
-	// - second ad will have it's start adjusted
-
-	// | @      |                      | @
-	//          |   deleted            |
-	//  tttttttt tttttttttttt tttt tttttttttt ttttt
-	// | og     | ad         | og | ad       | og
-	// in that case, pieces inside deletion will be removed
-	// - first ad will be removed
-	// - second og will be removed
-	// - second ad will have it's start adjusted
-
-	// This risky I and don't know if it's right:
-	// I'm assuming that when I delete a piece from the linked list,
-	// the next one will be on the same index, so if I keep deleting
-	// pieces on the same index when I need to delete it, it'll be safe...
-	pieces, index, startPosition, err := pt.FindPieces(position, length)
+	foundPiecesMetadata, err := pt.FindPieces(position, length)
 	if err != nil {
 		return err
 	}
-	if len(pieces) == 1 {
-		piece := pieces[0]
-		if position == startPosition {
-			piece.Start += piece.Length - length
+
+	if len(foundPiecesMetadata.Pieces) == 1 {
+		piece := foundPiecesMetadata.Pieces[0]
+		if position == foundPiecesMetadata.RuneStartPosition {
+			piece.RuneStart += length
+			piece.ByteStart += foundPiecesMetadata.ByteLength
 		}
-		// piece.Length = piece.Length - length
-		// delete at the middle of a piece
-		endPosition := startPosition + piece.Length
-		if position != endPosition {
-			// lengthBeforeChange := piece.Length
-			piece.Length = position - startPosition
-			newPieceStart := piece.Start + 1 + (position - startPosition)
+		deletionInTheMiddle := position != foundPiecesMetadata.RuneStartPosition && position+length != foundPiecesMetadata.RuneEndPosition
+		if deletionInTheMiddle {
+			piece.RuneLength = position - foundPiecesMetadata.RuneStartPosition
+			piece.ByteLength = foundPiecesMetadata.BytePosition - foundPiecesMetadata.ByteStartPosition
+			runeNewPieceStart := piece.RuneStart + length + (position - foundPiecesMetadata.RuneStartPosition)
+			byteNewPieceStart := piece.ByteStart + foundPiecesMetadata.ByteLength + (position - foundPiecesMetadata.ByteStartPosition)
 			newPiece := &Piece{
-				Start:      newPieceStart,
-				Length:     endPosition - (position + 1),
+				RuneStart:  runeNewPieceStart,
+				ByteStart:  byteNewPieceStart,
+				RuneLength: foundPiecesMetadata.RuneEndPosition - (position + 1),
+				ByteLength: foundPiecesMetadata.ByteEndPosition - (position + foundPiecesMetadata.ByteLength),
 				isOriginal: piece.isOriginal,
 			}
-			pt.Pieces.InsertAt(newPiece, index+1)
+			pt.Pieces.InsertAt(newPiece, foundPiecesMetadata.FirstPieceIndex+1)
 		} else {
-			piece.Length = piece.Length - length
+			piece.RuneLength = piece.RuneLength - length
+			piece.ByteLength = piece.ByteLength - foundPiecesMetadata.ByteLength
 		}
-		pt.DeleteIfEmpty(piece, index)
-	} else if len(pieces) == 2 {
-		firstPiece := pieces[0]
-		lastPiece := pieces[len(pieces)-1]
-		if position == startPosition {
+		pt.DeleteIfEmpty(piece, foundPiecesMetadata.FirstPieceIndex)
+	} else if len(foundPiecesMetadata.Pieces) == 2 {
+		firstPiece := foundPiecesMetadata.Pieces[0]
+		lastPiece := foundPiecesMetadata.Pieces[len(foundPiecesMetadata.Pieces)-1]
+		if position == foundPiecesMetadata.RuneStartPosition {
 			// IMPORTANT: I don't know if it's a valid thought:
-			// If position == startPosition, we are at the beginning of a piece,
+			// If position == runeStartPosition, we are at the beginning of a piece,
 			// But if the len(pieces) == 2 we know that the delete affected other piece,
 			// So how wrong for me to assume that the entire piece need to be deleted?
 			// Like:
@@ -468,44 +578,59 @@ func (pt *PieceTable) Delete(position uint, length uint) error {
 			//								^            ^
 			//								p1           p2
 			//
-			// This is the only case where two pieces are affected and the position == startPosition, no?
-			pt.Pieces.DeleteAt(index)
-			startPosition += firstPiece.Length
+			// This is the only case where two pieces are affected and the position == runeStartPosition, no?
+			pt.Pieces.DeleteAt(foundPiecesMetadata.FirstPieceIndex)
+			foundPiecesMetadata.RuneStartPosition += firstPiece.RuneLength
+			foundPiecesMetadata.ByteStartPosition += firstPiece.ByteLength
 		} else {
 			// IMPORTANT: Same thing as above, an assumption:
-			// The only case where two pieces are affected and now position != startPosition
+			// The only case where two pieces are affected and now position != runeStartPosition
 			// is when the position is at the middle of the first piece at it's length enters
 			// another piece, no?
 			// In that case, the firstPiece should have it's length decreased.
-			lengthBeforeAdd := firstPiece.Length
-			firstPiece.Length = position - startPosition
-			startPosition += lengthBeforeAdd // here we are at the second piece startPosition now
-			pt.DeleteIfEmpty(firstPiece, index)
-			index++
+			runeLengthBeforeAdd := firstPiece.RuneLength
+			byteLengthBeforeAdd := firstPiece.ByteLength
+			firstPiece.RuneLength = position - foundPiecesMetadata.RuneStartPosition
+			firstPiece.ByteLength = position - foundPiecesMetadata.ByteStartPosition
+			foundPiecesMetadata.RuneStartPosition += runeLengthBeforeAdd // here we are at the second piece startPosition now
+			foundPiecesMetadata.ByteStartPosition += byteLengthBeforeAdd
+			pt.DeleteIfEmpty(firstPiece, foundPiecesMetadata.FirstPieceIndex)
+			foundPiecesMetadata.FirstPieceIndex++
 		}
-		lastPiece.Start += (position + length) - startPosition
-		lastPiece.Length -= (position + length) - startPosition
-		pt.DeleteIfEmpty(lastPiece, index)
-	} else if len(pieces) > 2 {
-		firstPiece := pieces[0]
-		lengthBeforeAdd := firstPiece.Length
-		firstPiece.Length = position - startPosition // position >= startPosition always
-		startPosition += lengthBeforeAdd             // here we are at the second piece startPosition now
-		pt.DeleteIfEmpty(firstPiece, index)
-		index++
-		for i := 1; i < len(pieces)-1; i++ {
-			piece := pieces[i]
-			startPosition += piece.Length
-			pt.DeleteIfEmpty(piece, index)
+		lastPiece.RuneStart += (position + length) - foundPiecesMetadata.RuneStartPosition
+		lastPiece.ByteStart += (foundPiecesMetadata.BytePosition + foundPiecesMetadata.ByteLength) - foundPiecesMetadata.ByteStartPosition
+		lastPiece.RuneLength -= (position + length) - foundPiecesMetadata.RuneStartPosition
+		lastPiece.ByteLength -= (foundPiecesMetadata.BytePosition + foundPiecesMetadata.ByteLength) - foundPiecesMetadata.ByteStartPosition
+		pt.DeleteIfEmpty(lastPiece, foundPiecesMetadata.FirstPieceIndex)
+	} else if len(foundPiecesMetadata.Pieces) > 2 {
+		firstPiece := foundPiecesMetadata.Pieces[0]
+		runeLengthBeforeAdd := firstPiece.RuneLength
+		byteLengthBeforeAdd := firstPiece.ByteLength
+		firstPiece.RuneLength = position - foundPiecesMetadata.RuneStartPosition                         // position >= runeStartPosition always
+		firstPiece.ByteLength = foundPiecesMetadata.BytePosition - foundPiecesMetadata.ByteStartPosition // position >= runeStartPosition always
+		foundPiecesMetadata.RuneStartPosition += runeLengthBeforeAdd                                     // here we are at the second piece runeStartPosition now
+		foundPiecesMetadata.ByteStartPosition += byteLengthBeforeAdd
+		deleted := pt.DeleteIfEmpty(firstPiece, foundPiecesMetadata.FirstPieceIndex)
+		if !deleted {
+			foundPiecesMetadata.FirstPieceIndex++
 		}
-		// as the loop ends we are at the last piece startPosition
-		lastPiece := pieces[len(pieces)-1]
-		lastPiece.Start += (position + length) - startPosition
-		lastPiece.Length -= (position + length) - startPosition
-		pt.DeleteIfEmpty(lastPiece, index)
+		for i := 1; i < len(foundPiecesMetadata.Pieces)-1; i++ {
+			piece := foundPiecesMetadata.Pieces[i]
+			foundPiecesMetadata.RuneStartPosition += piece.RuneLength
+			foundPiecesMetadata.ByteStartPosition += piece.ByteLength
+			pt.Pieces.DeleteAt(foundPiecesMetadata.FirstPieceIndex)
+		}
+		// as the loop ends we are at the last piece runeStartPosition
+		lastPiece := foundPiecesMetadata.Pieces[len(foundPiecesMetadata.Pieces)-1]
+		lastPiece.RuneStart += (position + length) - foundPiecesMetadata.RuneStartPosition
+		lastPiece.ByteStart += (foundPiecesMetadata.BytePosition + foundPiecesMetadata.ByteLength) - foundPiecesMetadata.ByteStartPosition
+		lastPiece.RuneLength -= (position + length) - foundPiecesMetadata.RuneStartPosition
+		lastPiece.ByteLength -= (foundPiecesMetadata.BytePosition + foundPiecesMetadata.ByteLength) - foundPiecesMetadata.ByteStartPosition
+		pt.DeleteIfEmpty(lastPiece, foundPiecesMetadata.FirstPieceIndex)
 	}
 
-	pt.Length -= length
+	pt.RuneLength -= length
+	pt.ByteLength -= foundPiecesMetadata.ByteLength
 	return nil
 }
 

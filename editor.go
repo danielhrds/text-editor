@@ -70,7 +70,8 @@ func (c *Cursor) SetPosition(currentIndex int, x float32, y float32, line int, c
 }
 
 // TODO: Try to think of another approach to prevent the cursor from overlapping a char.
-const CURSOR_OFFSET_X = 2.0 // offset to prevent cursor overlap with text. maybe try another approach later.
+// Try += charWidth+offset and -= charWidth+offset later.
+const CURSOR_OFFSET_X = 0.0 // offset to prevent cursor overlap with text. maybe try another approach later.
 func (c *Cursor) Draw() {
 	c.TickTimer += rl.GetFrameTime()
 	// if c.TickTimer > c.TickTime {
@@ -132,7 +133,7 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 		FontSize:            fontSize,
 		FontColor:           rl.White,
 		Actions:             []Action{},
-		Cursor:              NewCursor(rl.NewRectangle(rectangle.X, rectangle.Y, 3, float32(fontSize)), 0, 0),
+		Cursor:              NewCursor(rl.NewRectangle(rectangle.X, rectangle.Y, 2, float32(fontSize)), 0, 0),
 		Lines:               make([]*Line, 0),
 		LastCursorPositions: make(map[int]CursorPosition),
 		CharRecCache:        make(map[rune]rl.Vector2),

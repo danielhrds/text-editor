@@ -145,11 +145,21 @@ func (pt *PieceTable) Runes() iter.Seq2[int, rune] {
 }
 
 func (pt *PieceTable) GetBytePosition(pieces []*Piece, position uint, runeStartPosition uint, byteStartPosition uint) (uint, uint) {
+	// Maybe runeStartPosition and byteStartPosition is redundant
+	// because runeStartPosition is the same as the first piece's start position.
+	// So I can have runeStartPosition and byteStartPosition with 
+	// pieces[0].RuneStart and pieces[0].ByteStart
+	
 	// TODO: Later change it to search only in one piece. runeStartPosition might be too far behind where the position is.
 	j := runeStartPosition
 	bytePosition := byteStartPosition
 	var byteIndex uint
 	for _, piece := range pieces {
+		// if piece.RuneStart+piece.RuneLength < position {
+		// 	j += piece.RuneLength
+		//  bytePosition += piece.ByteLength
+		// 	continue
+		// }
 		buffer := pt.PieceSequence(piece, piece.ByteStart, piece.ByteStart+piece.ByteLength)
 		index := 0
 		for index < len(buffer) {

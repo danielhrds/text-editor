@@ -9,8 +9,8 @@
       "type": "go",
       "request": "launch",
       "mode": "auto",
-      // "program": "${workspaceFolder}/cmd/piece-table",
       "program": "${workspaceFolder}",
+      // "program": "${workspaceFolder}/cmd/piece-table",
       "buildFlags": ["-buildvcs=false"],
     }
   ]

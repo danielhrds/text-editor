@@ -49,9 +49,9 @@ type FoundPieces struct {
 	Pieces            []*Piece
 	FirstPieceIndex   int
 	BytePosition      uint
-	ByteLength        uint
-	RuneStartPosition uint
-	ByteStartPosition uint
+	ByteLength        uint 
+	RuneStartPosition uint // represents first piece's start position
+	ByteStartPosition uint // represents first piece's start position
 	RuneEndPosition   uint
 	ByteEndPosition   uint
 }
@@ -147,9 +147,9 @@ func (pt *PieceTable) Runes() iter.Seq2[int, rune] {
 func (pt *PieceTable) GetBytePosition(pieces []*Piece, position uint, runeStartPosition uint, byteStartPosition uint) (uint, uint) {
 	// Maybe runeStartPosition and byteStartPosition is redundant
 	// because runeStartPosition is the same as the first piece's start position.
-	// So I can have runeStartPosition and byteStartPosition with 
+	// So I can have runeStartPosition and byteStartPosition with
 	// pieces[0].RuneStart and pieces[0].ByteStart
-	
+
 	// TODO: Later change it to search only in one piece. runeStartPosition might be too far behind where the position is.
 	j := runeStartPosition
 	bytePosition := byteStartPosition
@@ -551,10 +551,6 @@ func (pt *PieceTable) Delete(position uint, length uint) error {
 
 	if len(foundPiecesMetadata.Pieces) == 1 {
 		piece := foundPiecesMetadata.Pieces[0]
-		if position == foundPiecesMetadata.RuneStartPosition {
-			piece.RuneStart += length
-			piece.ByteStart += foundPiecesMetadata.ByteLength
-		}
 		deletionInTheMiddle := position != foundPiecesMetadata.RuneStartPosition && position+length != foundPiecesMetadata.RuneEndPosition
 		if deletionInTheMiddle {
 			piece.RuneLength = position - foundPiecesMetadata.RuneStartPosition
@@ -570,68 +566,40 @@ func (pt *PieceTable) Delete(position uint, length uint) error {
 			}
 			pt.Pieces.InsertAt(newPiece, foundPiecesMetadata.FirstPieceIndex+1)
 		} else {
-			piece.RuneLength = piece.RuneLength - length
-			piece.ByteLength = piece.ByteLength - foundPiecesMetadata.ByteLength
+			if position == foundPiecesMetadata.RuneStartPosition {
+				piece.RuneStart += length
+				piece.ByteStart += foundPiecesMetadata.ByteLength
+			}
+			piece.RuneLength -= length
+			piece.ByteLength -= foundPiecesMetadata.ByteLength
 		}
 		pt.DeleteIfEmpty(piece, foundPiecesMetadata.FirstPieceIndex)
-	} else if len(foundPiecesMetadata.Pieces) == 2 {
+	} else {
 		firstPiece := foundPiecesMetadata.Pieces[0]
 		lastPiece := foundPiecesMetadata.Pieces[len(foundPiecesMetadata.Pieces)-1]
-		if position == foundPiecesMetadata.RuneStartPosition {
-			// IMPORTANT: I don't know if it's a valid thought:
-			// If position == runeStartPosition, we are at the beginning of a piece,
-			// But if the len(pieces) == 2 we know that the delete affected other piece,
-			// So how wrong for me to assume that the entire piece need to be deleted?
-			// Like:
-			// 						__________________________
-			//                ^   deletion   ^
-			//								^            ^
-			//								p1           p2
-			//
-			// This is the only case where two pieces are affected and the position == runeStartPosition, no?
-			pt.Pieces.DeleteAt(foundPiecesMetadata.FirstPieceIndex)
-			foundPiecesMetadata.RuneStartPosition += firstPiece.RuneLength
-			foundPiecesMetadata.ByteStartPosition += firstPiece.ByteLength
-		} else {
-			// IMPORTANT: Same thing as above, an assumption:
-			// The only case where two pieces are affected and now position != runeStartPosition
-			// is when the position is at the middle of the first piece at it's length enters
-			// another piece, no?
-			// In that case, the firstPiece should have it's length decreased.
+		piecesToDeleteIndex := 0
+		deletionInTheMiddle := position != foundPiecesMetadata.RuneStartPosition
+		if deletionInTheMiddle {
 			runeLengthBeforeAdd := firstPiece.RuneLength
 			byteLengthBeforeAdd := firstPiece.ByteLength
-			firstPiece.RuneLength = position - foundPiecesMetadata.RuneStartPosition
-			firstPiece.ByteLength = position - foundPiecesMetadata.ByteStartPosition
-			foundPiecesMetadata.RuneStartPosition += runeLengthBeforeAdd // here we are at the second piece startPosition now
+			firstPiece.RuneLength = position - foundPiecesMetadata.RuneStartPosition                         // position >= runeStartPosition always
+			firstPiece.ByteLength = foundPiecesMetadata.BytePosition - foundPiecesMetadata.ByteStartPosition // position >= runeStartPosition always
+			foundPiecesMetadata.RuneStartPosition += runeLengthBeforeAdd                                     // here we are at the second piece runeStartPosition now
 			foundPiecesMetadata.ByteStartPosition += byteLengthBeforeAdd
-			pt.DeleteIfEmpty(firstPiece, foundPiecesMetadata.FirstPieceIndex)
+			// deleted := pt.DeleteIfEmpty(firstPiece, foundPiecesMetadata.FirstPieceIndex)
+			// if !deleted {
+			// 	foundPiecesMetadata.FirstPieceIndex++
+			// }
+			piecesToDeleteIndex = 1
 			foundPiecesMetadata.FirstPieceIndex++
 		}
-		lastPiece.RuneStart += (position + length) - foundPiecesMetadata.RuneStartPosition
-		lastPiece.ByteStart += (foundPiecesMetadata.BytePosition + foundPiecesMetadata.ByteLength) - foundPiecesMetadata.ByteStartPosition
-		lastPiece.RuneLength -= (position + length) - foundPiecesMetadata.RuneStartPosition
-		lastPiece.ByteLength -= (foundPiecesMetadata.BytePosition + foundPiecesMetadata.ByteLength) - foundPiecesMetadata.ByteStartPosition
-		pt.DeleteIfEmpty(lastPiece, foundPiecesMetadata.FirstPieceIndex)
-	} else if len(foundPiecesMetadata.Pieces) > 2 {
-		firstPiece := foundPiecesMetadata.Pieces[0]
-		runeLengthBeforeAdd := firstPiece.RuneLength
-		byteLengthBeforeAdd := firstPiece.ByteLength
-		firstPiece.RuneLength = position - foundPiecesMetadata.RuneStartPosition                         // position >= runeStartPosition always
-		firstPiece.ByteLength = foundPiecesMetadata.BytePosition - foundPiecesMetadata.ByteStartPosition // position >= runeStartPosition always
-		foundPiecesMetadata.RuneStartPosition += runeLengthBeforeAdd                                     // here we are at the second piece runeStartPosition now
-		foundPiecesMetadata.ByteStartPosition += byteLengthBeforeAdd
-		deleted := pt.DeleteIfEmpty(firstPiece, foundPiecesMetadata.FirstPieceIndex)
-		if !deleted {
-			foundPiecesMetadata.FirstPieceIndex++
-		}
-		for i := 1; i < len(foundPiecesMetadata.Pieces)-1; i++ {
+		for i := piecesToDeleteIndex; i < len(foundPiecesMetadata.Pieces)-1; i++ {
 			piece := foundPiecesMetadata.Pieces[i]
 			foundPiecesMetadata.RuneStartPosition += piece.RuneLength
 			foundPiecesMetadata.ByteStartPosition += piece.ByteLength
 			pt.Pieces.DeleteAt(foundPiecesMetadata.FirstPieceIndex)
 		}
 		// as the loop ends we are at the last piece runeStartPosition
-		lastPiece := foundPiecesMetadata.Pieces[len(foundPiecesMetadata.Pieces)-1]
 		lastPiece.RuneStart += (position + length) - foundPiecesMetadata.RuneStartPosition
 		lastPiece.ByteStart += (foundPiecesMetadata.BytePosition + foundPiecesMetadata.ByteLength) - foundPiecesMetadata.ByteStartPosition
 		lastPiece.RuneLength -= (position + length) - foundPiecesMetadata.RuneStartPosition

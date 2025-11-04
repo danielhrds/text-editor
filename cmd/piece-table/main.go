@@ -29,7 +29,13 @@ func test1() {
 	pt.Delete(8, 1)
 	fmt.Println(pt.ToString())
 	
-	pt.Delete(12, 3)
+	pt.Delete(12, 4) // should find 2 pieces
+	fmt.Println(pt.ToString())
+
+	pt.Delete(9, 4) // should find 2 pieces
+	fmt.Println(pt.ToString())
+
+	pt.Delete(6, 2) // should find 2 pieces
 	fmt.Println(pt.ToString())
 	
 	// pt.Insert(12, ptm.Sequence("TESTE"))

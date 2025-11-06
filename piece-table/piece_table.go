@@ -612,6 +612,10 @@ func (pt *PieceTable) Delete(position uint, length uint) error {
 	return nil
 }
 
+func (pt *PieceTable) Empty() bool {
+	return pt.RuneLength == 0 && pt.ByteLength == 0
+}
+
 // utils
 
 func Pow(x uint, y uint) uint {

@@ -119,13 +119,14 @@ type Editor struct {
 	InFocus             bool
 	ShowLines           bool
 	linesMaxVec         rl.Vector2
+	renderTexture       rl.RenderTexture2D
 }
 
 func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 	pieceTable := pt.NewPieceTable(pt.Sequence{})
 	fontSize := 30
 	defaultFont := rl.GetFontDefault()
-	return Editor{
+	editor := Editor{
 		WritableRec:         rectangle,
 		EditorRec:           rectangle,
 		BackgroundColor:     backgroundColor,
@@ -133,28 +134,41 @@ func NewEditor(rectangle rl.Rectangle, backgroundColor rl.Color) Editor {
 		FontSize:            fontSize,
 		FontColor:           rl.White,
 		Actions:             []Action{},
-		Cursor:              NewCursor(rl.NewRectangle(rectangle.X, rectangle.Y, 2, float32(fontSize)), 0, 0),
-		Lines:               make([]*Line, 0),
+		Lines:               make([]*Line, 1),
 		LastCursorPositions: make(map[int]CursorPosition),
 		CharRecCache:        make(map[rune]rl.Vector2),
 		LinesXPadding:       15,
 		InFocus:             false,
 		ShowLines:           true,
 		Font:                &defaultFont,
+		renderTexture:       rl.LoadRenderTexture(rectangle.ToInt32().Width, rectangle.ToInt32().Height),
 	}
+	editor.ChangeFont(&defaultFont)
+	editor.Lines[0] = &Line{
+		Start:       0,
+		Length:      0,
+		Rectangle:   rl.NewRectangle(editor.WritableRec.X, editor.WritableRec.Y, 0, float32(fontSize)),
+		AutoNewLine: false,
+	}
+	// editor.Cursor = NewCursor(rl.NewRectangle(editor.WritableRec.X, editor.WritableRec.Y, 2, float32(fontSize)), 0, 0)
+	editor._updateRenderTexture()
+	return editor
 }
 
 func (e *Editor) ChangeFont(font *rl.Font) {
+	clear(e.CharRecCache)
 	e.Font = font
 	oneLineWidth := e.CharRectangle('1')
 	if oneLineWidth.X > e.linesMaxVec.X {
 		e.linesMaxVec.X = oneLineWidth.X
 		e.WritableRec.Width = e.EditorRec.Width - oneLineWidth.X - e.LinesXPadding
-		e.WritableRec.X = e.EditorRec.X + oneLineWidth.X + oneLineWidth.X
+		e.WritableRec.X = e.EditorRec.X + oneLineWidth.X + e.LinesXPadding
 	}
 	if oneLineWidth.Y > e.linesMaxVec.Y {
 		e.linesMaxVec.Y = oneLineWidth.Y
 	}
+	// I don't know if it's a good idea to change the cursor position when changing the font, but that will do it for now
+	e.Cursor = NewCursor(rl.NewRectangle(e.WritableRec.X, e.WritableRec.Y, 2, float32(e.FontSize)), 0, 0)
 }
 
 func (e *Editor) Index() int {
@@ -221,18 +235,17 @@ func (e *Editor) CharRectangle(char rune) rl.Vector2 {
 }
 
 func (e *Editor) CharWidthWithSpacing(char rune) float32 {
-	charSize := e.CharRecCache[char]
 	if char == '\n' {
 		return 0
 	}
+	charSize := e.CharRectangle(char)
 	return charSize.X + e.CharSpacing
 }
 
 func (e *Editor) SequenceRectangle(sequence pt.Sequence) rl.Vector2 {
 	var vector2 rl.Vector2
 	for _, char := range sequence.RuneForward() {
-		rec := e.CharRectangle(char)
-		vector2.X += rec.X
+		vector2.X += e.CharWidthWithSpacing(char)
 	}
 	return vector2
 }
@@ -298,7 +311,7 @@ func (e *Editor) CalculateLines() {
 		if linesCountRec.X > e.linesMaxVec.X {
 			e.linesMaxVec.X = linesCountRec.X
 			e.WritableRec.Width = e.EditorRec.Width - linesCountRec.X - e.LinesXPadding
-			e.WritableRec.X = e.EditorRec.X + linesCountRec.X + linesCountRec.X
+			e.WritableRec.X = e.EditorRec.X + linesCountRec.X + e.LinesXPadding
 			e.CalculateLines()
 			return
 		}
@@ -383,6 +396,8 @@ func (e *Editor) CalculateLines() {
 		addLine(currentLine)
 	}
 
+	e._updateRenderTexture()
+
 	// ------------ Debugging ------------
 
 	utils.Logger.Println("------------------------------------------------")
@@ -395,19 +410,7 @@ func (e *Editor) CalculateLines() {
 
 }
 
-func CheckLinesCharactersLength(lines []*Line, text string) {
-	totalLineChars := 0
-	for _, line := range lines {
-		totalLineChars += line.Length
-	}
-	if totalLineChars < len(text) {
-		utils.Logger.Println("Warning: more characters than space in e.Lines", totalLineChars, len(text))
-	}
-}
-
 func (e *Editor) DrawText() {
-	// CheckLinesCharactersLength(e.Lines, e.PieceTable.ToString())
-
 	currentLineIndex := 0
 	currentLine := e.Lines[currentLineIndex]
 	charXPosition := currentLine.Rectangle.X
@@ -419,6 +422,10 @@ func (e *Editor) DrawText() {
 			color = rl.White
 		}
 		rl.DrawTextEx(*e.Font, utils.IntToString(currentLineIndex+1), rl.NewVector2(e.EditorRec.X, currentLine.Rectangle.Y), float32(e.FontSize), 0, color)
+	}
+	if e.PieceTable.Empty() {
+		DrawLineNumber()
+		return
 	}
 	for _, char := range e.PieceTable.ToString() {
 		if length >= currentLine.Length {
@@ -437,7 +444,9 @@ func (e *Editor) DrawText() {
 	}
 }
 
-func (e *Editor) Draw() {
+func (e *Editor) _updateRenderTexture() {
+	rl.BeginTextureMode(e.renderTexture)
+	rl.ClearBackground(rl.Blank)
 	rl.DrawRectanglePro(
 		e.EditorRec,
 		rl.NewVector2(0, 0),
@@ -445,6 +454,18 @@ func (e *Editor) Draw() {
 		e.BackgroundColor,
 	)
 	e.DrawText()
+	rl.EndTextureMode()
+}
+
+func (e *Editor) Draw() {
+	recToDraw := e.EditorRec
+	recToDraw.Height = -recToDraw.Height
+	rl.DrawTextureRec(
+		e.renderTexture.Texture,
+		recToDraw,
+		rl.NewVector2(e.EditorRec.X, e.EditorRec.Y),
+		rl.White,
+	)
 	// if e.InFocus {
 	e.Cursor.Draw()
 	// }
